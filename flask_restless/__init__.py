@@ -19,4 +19,8 @@
 __version__ = '0.6-dev'
 
 # make the following name available as part of the public API
+from .backends import Backend
+from .backends import register_backend
+from .backends import SQLAlchemyBackendBase
+from .backends import unregister_backend
 from .manager import APIManager

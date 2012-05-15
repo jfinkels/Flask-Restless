@@ -17,6 +17,7 @@ User's guide
    customizing
    searchformat
    requestformat
+   backends
 
 API reference
 -------------

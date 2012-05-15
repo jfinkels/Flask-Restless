@@ -10,10 +10,8 @@
 """
 import datetime
 from unittest2 import skipUnless
-from unittest2 import TestCase
 from unittest2 import TestSuite
 
-from flask import Flask
 from flask import json
 try:
     from flask.ext.sqlalchemy import SQLAlchemy
@@ -23,7 +21,7 @@ else:
     has_flask_sqlalchemy = True
 
 from flask.ext.restless import APIManager
-from flask.ext.restless.views import _get_columns
+from flask.ext.restless.backends import SQLAlchemyBackend
 
 from .helpers import FlaskTestBase
 from .helpers import setUpModule
@@ -31,7 +29,7 @@ from .helpers import tearDownModule
 from .helpers import TestSupport
 
 
-__all__ = ['APIManagerTest']
+__all__ = ['APIManagerTest', 'FSATest']
 
 
 dumps = json.dumps
@@ -157,7 +155,7 @@ class APIManagerTest(TestSupport):
         return in the JSON representation of instances of the model.
 
         """
-        all_columns = _get_columns(self.Person)
+        all_columns = SQLAlchemyBackend.get_columns(self.Person)
         # allow all
         self.manager.create_api(self.Person, include_columns=None,
                                 url_prefix='/all')

@@ -16,13 +16,8 @@ from datetime import datetime
 from unittest2 import TestSuite
 
 from flask import json
-from sqlalchemy.exc import OperationalError
 
-from flask.ext.restless.views import _evaluate_functions as evaluate_functions
-from flask.ext.restless.views import _get_columns
-from flask.ext.restless.views import _get_or_create
-from flask.ext.restless.views import _get_relations
-from flask.ext.restless.views import _to_dict
+from flask.ext.restless.backends import SQLAlchemyBackend
 from flask.ext.restless.manager import IllegalArgumentError
 
 from .helpers import setUpModule
@@ -31,8 +26,7 @@ from .helpers import TestSupport
 from .helpers import TestSupportPrefilled
 
 
-__all__ = ['ModelTestCase', 'FunctionEvaluationTest', 'FunctionAPITestCase',
-           'APITestCase']
+__all__ = ['ModelTestCase', 'FunctionAPITestCase', 'APITestCase']
 
 
 dumps = json.dumps
@@ -44,11 +38,11 @@ class ModelTestCase(TestSupport):
 
     def test_column_introspection(self):
         """Test for getting the names of columns as strings."""
-        columns = _get_columns(self.Person)
+        columns = SQLAlchemyBackend.get_columns(self.Person)
         self.assertEqual(sorted(columns.keys()), sorted(['age', 'birth_date',
                                                          'computers', 'id',
                                                          'name', 'other']))
-        relations = _get_relations(self.Person)
+        relations = SQLAlchemyBackend.get_relations(self.Person)
         self.assertEqual(relations, ['computers'])
 
     def test_date_serialization(self):
@@ -58,7 +52,7 @@ class ModelTestCase(TestSupport):
         """
         person = self.Person(birth_date=date(1986, 9, 15))
         self.session.commit()
-        d = _to_dict(person)
+        d = SQLAlchemyBackend.to_dict(person)
         self.assertIn('birth_date', d)
         self.assertEqual(d['birth_date'], person.birth_date.isoformat())
 
@@ -69,7 +63,7 @@ class ModelTestCase(TestSupport):
         """
         computer = self.Computer(buy_date=datetime.now())
         self.session.commit()
-        d = _to_dict(computer)
+        d = SQLAlchemyBackend.to_dict(computer)
         self.assertIn('buy_date', d)
         self.assertEqual(d['buy_date'], computer.buy_date.isoformat())
 
@@ -81,7 +75,7 @@ class ModelTestCase(TestSupport):
         me = self.Person(name=u'Lincoln', age=24, birth_date=date(1986, 9, 15))
         self.session.commit()
 
-        me_dict = _to_dict(me)
+        me_dict = SQLAlchemyBackend.to_dict(me)
         expectedfields = sorted(['birth_date', 'age', 'id', 'name', 'other'])
         self.assertEqual(sorted(me_dict), expectedfields)
         self.assertEqual(me_dict['name'], u'Lincoln')
@@ -102,7 +96,7 @@ class ModelTestCase(TestSupport):
         self.session.commit()
 
         deep = {'computers': []}
-        computers = _to_dict(someone, deep)['computers']
+        computers = SQLAlchemyBackend.to_dict(someone, deep)['computers']
         self.assertEqual(len(computers), 1)
         self.assertEqual(computers[0]['name'], u'lixeiro')
         self.assertEqual(computers[0]['vendor'], u'Lemote')
@@ -113,62 +107,20 @@ class ModelTestCase(TestSupport):
         """Test for :meth:`flask_restless.model.Entity.get_or_create()`."""
         # Here we're sure that we have a fresh table with no rows, so
         # let's create the first one:
-        instance, created = _get_or_create(self.session, self.Person,
-                                           name=u'Lincoln', age=24)
+        instance, created = \
+            SQLAlchemyBackend.get_or_create(self.Person, self.session,
+                                            name=u'Lincoln', age=24)
         self.assertTrue(created)
         self.assertEqual(instance.name, u'Lincoln')
         self.assertEqual(instance.age, 24)
 
         # Now that we have a row, let's try to get it again
-        second_instance, created = _get_or_create(self.session, self.Person,
-                                                  name=u'Lincoln')
+        second_instance, created = \
+            SQLAlchemyBackend.get_or_create(self.Person, self.session,
+                                            name=u'Lincoln')
         self.assertFalse(created)
         self.assertEqual(second_instance.name, u'Lincoln')
         self.assertEqual(second_instance.age, 24)
-
-
-class FunctionEvaluationTest(TestSupportPrefilled):
-    """Unit tests for the :func:`flask_restless.view._evaluate_functions`
-    function.
-
-    """
-
-    def test_basic_evaluation(self):
-        """Tests for basic function evaluation."""
-        # test for no model
-        result = evaluate_functions(self.session, None, [])
-        self.assertEqual(result, {})
-
-        # test for no functions
-        result = evaluate_functions(self.session, self.Person, [])
-        self.assertEqual(result, {})
-
-        # test for summing ages
-        functions = [{'name': 'sum', 'field': 'age'}]
-        result = evaluate_functions(self.session, self.Person, functions)
-        self.assertIn('sum__age', result)
-        self.assertEqual(result['sum__age'], 102.0)
-
-        # test for multiple functions
-        functions = [{'name': 'sum', 'field': 'age'},
-                     {'name': 'avg', 'field': 'other'}]
-        result = evaluate_functions(self.session, self.Person, functions)
-        self.assertIn('sum__age', result)
-        self.assertEqual(result['sum__age'], 102.0)
-        self.assertIn('avg__other', result)
-        self.assertEqual(result['avg__other'], 16.2)
-
-    def test_poorly_defined_functions(self):
-        """Tests that poorly defined functions raise errors."""
-        # test for unknown field
-        functions = [{'name': 'sum', 'field': 'bogus'}]
-        with self.assertRaises(AttributeError):
-            evaluate_functions(self.session, self.Person, functions)
-
-        # test for unknown function
-        functions = [{'name': 'bogus', 'field': 'age'}]
-        with self.assertRaises(OperationalError):
-            evaluate_functions(self.session, self.Person, functions)
 
 
 class FunctionAPITestCase(TestSupportPrefilled):
@@ -284,7 +236,7 @@ class APITestCase(TestSupport):
 
         deep = {'computers': []}
         person = self.session.query(self.Person).filter_by(id=1).first()
-        inst = _to_dict(person, deep)
+        inst = SQLAlchemyBackend.to_dict(person, deep)
         self.assertEqual(loads(response.data), inst)
 
     def test_post_with_submodels(self):
@@ -312,7 +264,7 @@ class APITestCase(TestSupport):
         # Making sure it has been created
         deep = {'computers': []}
         person = self.session.query(self.Person).filter_by(id=1).first()
-        inst = _to_dict(person, deep)
+        inst = SQLAlchemyBackend.to_dict(person, deep)
         response = self.app.get('/api/person/1')
         self.assertEqual(loads(response.data), inst)
 
@@ -820,6 +772,5 @@ def load_tests(loader, standard_tests, pattern):
     suite = TestSuite()
     suite.addTest(loader.loadTestsFromTestCase(ModelTestCase))
     suite.addTest(loader.loadTestsFromTestCase(FunctionAPITestCase))
-    suite.addTest(loader.loadTestsFromTestCase(FunctionEvaluationTest))
     suite.addTest(loader.loadTestsFromTestCase(APITestCase))
     return suite

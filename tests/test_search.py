@@ -13,11 +13,10 @@ from __future__ import with_statement
 from unittest2 import TestSuite
 from unittest2 import TestCase
 
-from sqlalchemy.orm.exc import MultipleResultsFound
-from sqlalchemy.orm.exc import NoResultFound
-
 from flask.ext.restless.search import create_query
 from flask.ext.restless.search import Filter
+from flask.ext.restless.search import MultipleResultsFound
+from flask.ext.restless.search import NoResultFound
 from flask.ext.restless.search import search
 from flask.ext.restless.search import SearchParameters
 

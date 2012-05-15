@@ -13,6 +13,8 @@ Version 0.6
 
 Not yet released.
 
+- Made backend-specific code more extensible, so other database abstraction
+  layers can be easily added.
 - Added support for pagination of responses.
 - Fixed issue due to symbolic link from :file:`README` to :file:`README.md`
   when running ``pip bundle foobar Flask-Restless``.

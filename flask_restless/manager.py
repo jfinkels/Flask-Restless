@@ -15,6 +15,7 @@
 from flask import Blueprint
 from sqlalchemy.orm import scoped_session
 
+from .backends import infer_backend
 from .views import API
 from .views import FunctionAPI
 
@@ -307,8 +308,9 @@ class APIManager(object):
             msg = ('If authentication_required is specified, so must'
                    ' authentication_function.')
             raise IllegalArgumentError(msg)
+        backend = infer_backend(model)
         if collection_name is None:
-            collection_name = model.__tablename__
+            collection_name = backend.get_table_name(model)
         # convert all method names to upper case
         methods = frozenset((m.upper() for m in methods))
         # sets of methods used for different types of endpoints
@@ -326,7 +328,7 @@ class APIManager(object):
         # the name of the API, for use in creating the view and the blueprint
         apiname = APIManager.APINAME_FORMAT % collection_name
         # the view function for the API for this model
-        api_view = API.as_view(apiname, self.session, model,
+        api_view = API.as_view(apiname, self.session, model, backend,
                                authentication_required_for,
                                authentication_function, include_columns,
                                validation_exceptions, results_per_page)
@@ -352,7 +354,7 @@ class APIManager(object):
         if allow_functions:
             eval_api_name = apiname + 'eval'
             eval_api_view = FunctionAPI.as_view(eval_api_name, self.session,
-                                                model)
+                                                model, backend)
             eval_endpoint = '/eval' + collection_endpoint
             blueprint.add_url_rule(eval_endpoint, methods=['GET'],
                                    view_func=eval_api_view)

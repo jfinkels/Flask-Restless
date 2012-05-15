@@ -15,6 +15,9 @@
 """
 import inspect
 
+from sqlalchemy.orm.exc import MultipleResultsFound as _MultipleResultsFound
+from sqlalchemy.orm.exc import NoResultFound as _NoResultFound
+
 from .helpers import unicode_keys_to_strings
 
 #: The mapping from operator name (as accepted by the search method) to a
@@ -65,6 +68,14 @@ OPERATORS = {
     'has': lambda f, a, fn: f.has(**{str(fn): a}),
     'any': lambda f, a, fn: f.any(**{str(fn): a})
 }
+
+
+class NoResultFound(Exception):
+    pass
+
+
+class MultipleResultsFound(Exception):
+    pass
 
 
 class OrderBy(object):
@@ -426,6 +437,10 @@ def search(session, model, search_params):
     is_single = search_params.get('single')
     query = create_query(session, model, search_params)
     if is_single:
-        # may raise NoResultFound or MultipleResultsFound
-        return query.one()
+        try:
+            return query.one()
+        except _NoResultFound, exception:
+            raise NoResultFound(*exception.args)
+        except _MultipleResultsFound, exception:
+            raise MultipleResultsFound(*exception.args)
     return query.all()
