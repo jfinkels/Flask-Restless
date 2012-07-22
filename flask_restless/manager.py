@@ -195,7 +195,8 @@ class APIManager(object):
                              authentication_function=None,
                              include_columns=None, validation_exceptions=None,
                              results_per_page=10,
-                             post_form_preprocessor=None):
+                             post_form_preprocessor=None,
+                             api_class=API):
         """Creates an returns a ReSTful API interface as a blueprint, but does
         not register it on any :class:`flask.Flask` application.
 
@@ -333,7 +334,7 @@ class APIManager(object):
         # the name of the API, for use in creating the view and the blueprint
         apiname = APIManager.APINAME_FORMAT % collection_name
         # the view function for the API for this model
-        api_view = API.as_view(apiname, self.session, model,
+        api_view = api_class.as_view(apiname, self.session, model,
                                authentication_required_for,
                                authentication_function, include_columns,
                                validation_exceptions, results_per_page,

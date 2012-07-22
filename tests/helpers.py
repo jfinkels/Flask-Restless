@@ -126,7 +126,7 @@ class TestSupport(FlaskTestBase):
             other = Column(Float)
             birth_date = Column(Date)
             computers = relationship('Computer',
-                                     backref=backref('owner', lazy='dynamic'))
+                                     backref=backref('owner'))
 
         class Planet(self.Base):
             __tablename__ = 'planet'
