@@ -103,8 +103,12 @@ class APIManager(object):
             apimanager = APIManager(app, flask_sqlalchemy_db=db)
 
         """
-        self.init_app(app, session, flask_sqlalchemy_db)
-
+        if app is not None:
+            self.app = app
+            self.init_app(self.app, session, flask_sqlalchemy_db)
+        else:
+            self.app = None
+	
     def _next_blueprint_name(self, basename):
         """Returns the next name for a blueprint with the specified base name.
 
