@@ -701,26 +701,52 @@ class API(ModelView):
         responses, see :ref:`searchformat`.
 
         """
-        # try to get search query from the request query parameters
-        try:
-            data = json.loads(request.args.get('q', '{}'))
-        except (TypeError, ValueError, OverflowError):
-            return jsonify_status_code(400, message='Unable to decode data')
+        if 'q' in request.args:
+            # try to get search query from the request query parameters
+            try:
+                data = json.loads(request.args.get('q', '{}'))
+            except (TypeError, ValueError, OverflowError):
+                return jsonify_status_code(400, message='Unable to decode data')
+    
+            # perform a filtered search
+            try:
+                result = search(self.session, self.model, data)
+            except NoResultFound:
+                return jsonify(message='No result found')
+            except MultipleResultsFound:
+                return jsonify(message='Multiple results found')
+            except:
+                return jsonify_status_code(400,
+                                           message='Unable to construct query')
 
-        # perform a filtered search
-        try:
-            result = search(self.session, self.model, data)
-        except NoResultFound:
-            return jsonify(message='No result found')
-        except MultipleResultsFound:
-            return jsonify(message='Multiple results found')
-        except:
+            # create a placeholder for the relations of the returned models
+            relations = _get_relations(self.model)
+            deep = dict((r, {}) for r in relations)
+
+        elif 'c' in request.args:
+            # try to get count query from the request query parameters
+            try:
+                data = json.loads(request.args.get('c', '{}'))
+            except (TypeError, ValueError, OverflowError):
+                return jsonify_status_code(400, message='Unable to decode data')
+    
+            # perform a filtered search
+            try:
+                result = count(self.session, self.model, data)
+                result = jsonify({'count': result})
+            except NoResultFound:
+                return jsonify(message='No result found')
+            except MultipleResultsFound:
+                return jsonify(message='Multiple results found')
+            except:
+                return jsonify_status_code(400,
+                                           message='Unable to construct query')
+                
+            deep = None
+            
+        else:
             return jsonify_status_code(400,
                                        message='Unable to construct query')
-
-        # create a placeholder for the relations of the returned models
-        relations = _get_relations(self.model)
-        deep = dict((r, {}) for r in relations)
 
         # for security purposes, don't transmit list as top-level JSON
         if isinstance(result, list):

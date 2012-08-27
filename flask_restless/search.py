@@ -371,6 +371,33 @@ class QueryBuilder(object):
             query = query.offset(search_params.offset)
         return query
 
+    @staticmethod
+    def create_count(session, model, search_params):
+        """Builds an SQLAlchemy count instance based on the search parameters
+        present in ``search_params``, an instance of :class:`SearchParameters`.
+
+        This method returns a SQLAlchemy query in which all matched instances
+        meet the requirements specified in ``search_params``.
+
+        `model` is SQLAlchemy declarative model on which to create a query.
+
+        `search_params` is an instance of :class:`SearchParameters` which
+        specify the filters, order, limit, offset, etc. of the query.
+
+        Raises one of :exc:`AttributeError`, :exc:`KeyError`, or
+        :exc:`TypeError` if there is a problem creating the query. See the
+        documentation for :func:`_create_operation` for more information.
+
+        """
+        # Adding field filters
+        query = session.query(model).count()
+        # may raise exception here
+        filters = QueryBuilder._create_filters(model, search_params)
+        for filt in filters:
+            query = query.filter(filt)
+
+        return query
+
 
 def create_query(session, model, searchparams):
     """Returns a SQLAlchemy query object on the given `model` where the search
@@ -393,6 +420,27 @@ def create_query(session, model, searchparams):
         searchparams = SearchParameters.from_dictionary(searchparams)
     return QueryBuilder.create_query(session, model, searchparams)
 
+
+def create_count(session, model, searchparams):
+    """Returns a SQLAlchemy count object on the given `model` where the search
+    for the query is defined by `searchparams`.
+
+    The returned query matches the set of all instances of `model` which meet
+    the parameters of the search given by `searchparams`. For more information
+    on search parameters, see :ref:`search`.
+
+    `model` is a SQLAlchemy declarative model representing the database model
+    to query.
+
+    `searchparams` is either a dictionary (as parsed from a JSON request from
+    the client, for example) or a :class:`SearchParameters` instance defining
+    the parameters of the query (as returned by
+    :func:`SearchParameters.from_dictionary`, for example).
+
+    """
+    if isinstance(searchparams, dict):
+        searchparams = SearchParameters.from_dictionary(searchparams)
+    return QueryBuilder.create_count(session, model, searchparams)
 
 def search(session, model, search_params):
     """Performs the search specified by the given parameters on the model
@@ -429,3 +477,27 @@ def search(session, model, search_params):
         # may raise NoResultFound or MultipleResultsFound
         return query.one()
     return query.all()
+
+def count(session, model, search_params):
+    """Performs the count specified by the given parameters on the model
+    specified in the constructor of this class.
+
+    This function essentially calls :func:`create_count` to create a count query
+    which counts the set of all instances of ``model`` which meet the search
+    parameters defined in ``search_params``, then returns all results (or just
+    one if ``search_params['single'] == True``).
+
+    This function returns a scalar result.
+
+    `model` is a SQLAlchemy declarative model class representing the database
+    model to query.
+
+    `search_params` is a dictionary containing all available search
+    parameters. For more information on available search parameters, see
+    :ref:`search`. Implementation note: this dictionary will be converted to a
+    :class:`SearchParameters` object when the :func:`create_query` function is
+    called.
+
+    """
+    query = create_count(session, model, search_params)
+    return query.scalar()
