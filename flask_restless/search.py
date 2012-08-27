@@ -390,7 +390,7 @@ class QueryBuilder(object):
 
         """
         # Adding field filters
-        query = session.query(model).count()
+        query = session.query(model)
         # may raise exception here
         filters = QueryBuilder._create_filters(model, search_params)
         for filt in filters:
@@ -500,4 +500,4 @@ def count(session, model, search_params):
 
     """
     query = create_count(session, model, search_params)
-    return query.scalar()
+    return query.count()
