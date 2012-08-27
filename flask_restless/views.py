@@ -42,8 +42,8 @@ from sqlalchemy.orm.properties import RelationshipProperty as RelProperty
 from sqlalchemy.sql import func
 
 from .helpers import unicode_keys_to_strings
-from .search import create_query
-from .search import search
+from .search import create_query, create_query
+from .search import search, count
 
 
 def jsonify_status_code(status_code, *args, **kw):
