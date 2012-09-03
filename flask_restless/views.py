@@ -47,8 +47,8 @@ from sqlalchemy.orm.query import Query
 from sqlalchemy.sql import func
 
 from .helpers import unicode_keys_to_strings
-from .search import create_query
-from .search import search
+from .search import create_query, create_count
+from .search import search, count
 
 
 def jsonify_status_code(status_code, *args, **kw):
@@ -716,34 +716,62 @@ class API(ModelView):
         responses, see :ref:`searchformat`.
 
         """
-        # try to get search query from the request query parameters
-        try:
-            data = json.loads(request.args.get('q', '{}'))
-        except (TypeError, ValueError, OverflowError):
-            return jsonify_status_code(400, message='Unable to decode data')
+        if 'q' in request.args:
 
-        # perform a filtered search
-        try:
-            result = search(self.session, self.model, data)
-        except NoResultFound:
-            return jsonify(message='No result found')
-        except MultipleResultsFound:
-            return jsonify(message='Multiple results found')
-        except:
+            # try to get search query from the request query parameters
+            try:
+                data = json.loads(request.args.get('q', '{}'))
+            except (TypeError, ValueError, OverflowError):
+                return jsonify_status_code(400, message='Unable to decode data')
+
+            # perform a filtered search
+            try:
+                result = search(self.session, self.model, data)
+            except NoResultFound:
+                return jsonify(message='No result found')
+            except MultipleResultsFound:
+                return jsonify(message='Multiple results found')
+            except:
+                return jsonify_status_code(400,
+                                           message='Unable to construct query')
+
+            # create a placeholder for the relations of the returned models
+            relations = _get_relations(self.model)
+            deep = dict((r, {}) for r in relations)
+
+            # for security purposes, don't transmit list as top-level JSON
+            if isinstance(result, list):
+                return self._paginated(result, deep)
+            else:
+                result = _to_dict_include(result, deep,
+                                          include=self.include_columns)
+                return jsonify(result)
+
+        elif 'c' in request.args:
+
+            # try to get count query from the request query parameters
+            try:
+                data = json.loads(request.args.get('c', '{}'))
+            except (TypeError, ValueError, OverflowError):
+                return jsonify_status_code(400, message='Unable to decode data')
+
+            # perform a filtered search
+            try:
+                result = count(self.session, self.model, data)
+            except NoResultFound:
+                return jsonify(message='No result found')
+            except MultipleResultsFound:
+                return jsonify(message='Multiple results found')
+            except BaseException as e:
+                return jsonify_status_code(400,
+                                           message='Unable to construct query %s' % str(e))
+
+            return jsonify({'count': result})
+
+        else:
+
             return jsonify_status_code(400,
                                        message='Unable to construct query')
-
-        # create a placeholder for the relations of the returned models
-        relations = _get_relations(self.model)
-        deep = dict((r, {}) for r in relations)
-
-        # for security purposes, don't transmit list as top-level JSON
-        if isinstance(result, list):
-            return self._paginated(result, deep)
-        else:
-            result = _to_dict_include(result, deep,
-                                      include=self.include_columns)
-            return jsonify(result)
 
     # TODO it is ugly to have `deep` as an arg here; can we remove it?
     def _paginated(self, instances, deep):
@@ -909,7 +937,7 @@ class API(ModelView):
             # Handling relations, a single level is allowed
             for col in set(relations).intersection(paramkeys):
                 submodel = cols[col].property.mapper.class_
-                
+
                 if type(params[col]) == list:
                     # model has several related objects
                     for subparams in params[col]:
