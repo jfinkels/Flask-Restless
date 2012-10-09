@@ -194,6 +194,11 @@ def _to_dict(instance, deep=None, exclude=None, include=None,
     elif include is not None:
         columns = (c for c in columns if c in include)
     result = dict((col, getattr(instance, col)) for col in columns)
+    
+    for k in exclude:
+        if k in result:
+            del result[k]
+    
     # Convert datetime and date objects to ISO 8601 format.
     #
     # TODO We can get rid of this when issue #33 is resolved.
