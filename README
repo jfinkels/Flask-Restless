@@ -1,5 +1,20 @@
 # Flask-Restless #
 
+## Features Added ##
+ * Additional query filter operators (ILIKE);
+ * Returning row count as part of an API Manager result;
+ * Ability to use or_() in query filters:
+
+    {name:'closed', op:'eq', val:1},
+    [
+      {name:'name',op:'like',val:'%john%'},
+      {name:'description',op:'like',val:'%michael%'}
+    ]
+
+will result in:
+... WHERE closed=1 AND (name LIKE '%john%' OR name LIKE '%michael%')
+
+
 ## Introduction ##
 
 This is Flask-Restless, a [Flask][1] extension which facilitates the creation
