@@ -363,7 +363,7 @@ class QueryBuilder(object):
             field = getattr(model, val.field)
             direction = getattr(field, val.direction)
             query = query.order_by(direction())
-
+        query.total_rows=query.count()
         # Limit it
         if search_params.limit:
             query = query.limit(search_params.limit)
@@ -427,5 +427,5 @@ def search(session, model, search_params):
     query = create_query(session, model, search_params)
     if is_single:
         # may raise NoResultFound or MultipleResultsFound
-        return query.one()
-    return query.all()
+        return (query.one(), 1)
+    return (query.all(), query.total_rows)
