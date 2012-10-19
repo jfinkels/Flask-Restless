@@ -16,6 +16,7 @@
 import inspect
 
 from .helpers import unicode_keys_to_strings
+from sqlalchemy import or_
 
 #: The mapping from operator name (as accepted by the search method) to a
 #: function which returns the SQLAlchemy expression corresponding to that
@@ -58,6 +59,7 @@ OPERATORS = {
     'lte': lambda f, a: f <= a,
     'leq': lambda f, a: f <= a,
     'like': lambda f, a: f.like(a),
+    'ilike': lambda f, a: f.ilike(a),
     'in': lambda f, a: f.in_(a),
     'not_in': lambda f, a: ~f.in_(a),
     # Operators which accept three arguments.
@@ -215,9 +217,17 @@ class SearchParameters(object):
         ignored.
 
         """
-        # for the sake of brevity...
-        from_dict = Filter.from_dictionary
-        filters = [from_dict(f) for f in dictionary.get('filters', [])]
+        def _recurse_list(lst):
+            _f=[]
+            for f in lst:
+                if isinstance(f,list):
+                    _f.append(_recurse_list(f))
+                else:
+                    _f.append(Filter.from_dictionary(f))
+            return _f
+
+        filters=_recurse_list(dictionary.get('filters', []))
+
         # HACK In Python 2.5, unicode dictionary keys are not allowed.
         order_by_list = dictionary.get('order_by', [])
         order_by_list = (unicode_keys_to_strings(o) for o in order_by_list)
@@ -298,34 +308,37 @@ class QueryBuilder(object):
         return opfunc(field, argument, fieldname)
 
     @staticmethod
-    def _create_filters(model, search_params):
+    def _create_filters(model, filters):
         """Returns the list of operations on `model` specified in the
         :attr:`filters` attribute on the `search_params` object.
 
-        `search-params` is an instance of the :class:`SearchParameters` class
-        whose fields represent the parameters of the search.
+        `filters` is the filters list from an instance of the :class:`SearchParameters` 
+        class whose fields represent the parameters of the search.
 
         Raises one of :exc:`AttributeError`, :exc:`KeyError`, or
         :exc:`TypeError` if there is a problem creating the query. See the
         documentation for :func:`_create_operation` for more information.
 
         """
-        filters = []
-        for filt in search_params.filters:
-            fname = filt.fieldname
-            val = filt.argument
-            # get the relationship from the field name, if it exists
-            relation = None
-            if '__' in fname:
-                relation, fname = fname.split('__')
-            # get the other field to which to compare, if it exists
-            if filt.otherfield:
-                val = getattr(model, filt.otherfield)
-            # for the sake of brevity...
-            create_op = QueryBuilder._create_operation
-            param = create_op(model, fname, filt.operator, val, relation)
-            filters.append(param)
-        return filters
+        _filters = []
+        for filt in filters:
+            if isinstance(filt,list):
+                _filters.append(QueryBuilder._create_filters(model, filt))
+            else:
+                fname = filt.fieldname
+                val = filt.argument
+                # get the relationship from the field name, if it exists
+                relation = None
+                if '__' in fname:
+                    relation, fname = fname.split('__')
+                # get the other field to which to compare, if it exists
+                if filt.otherfield:
+                    val = getattr(model, filt.otherfield)
+                # for the sake of brevity...
+                create_op = QueryBuilder._create_operation
+                param = create_op(model, fname, filt.operator, val, relation)
+                _filters.append(param)
+        return _filters
 
     @staticmethod
     def create_query(session, model, search_params):
@@ -354,9 +367,12 @@ class QueryBuilder(object):
         # Adding field filters
         query = session.query(model)
         # may raise exception here
-        filters = QueryBuilder._create_filters(model, search_params)
+        filters = QueryBuilder._create_filters(model, search_params.filters)
         for filt in filters:
-            query = query.filter(filt)
+            if isinstance(filt,list):
+                query = query.filter(or_(*filt))
+            else:
+                query = query.filter(filt)
 
         # Order the search
         for val in search_params.order_by:

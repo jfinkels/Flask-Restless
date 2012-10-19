@@ -223,7 +223,7 @@ def _to_dict(instance, deep=None, exclude=None, include=None,
                                          include=newinclude)
                                 for inst in relatedvalue]
         else:
-            result[relation] = _to_dict(relatedvalue.one(), rdeep,
+            result[relation] = _to_dict(relatedvalue, rdeep,
                                         exclude=newexclude,
                                         include=newinclude)
     return result
