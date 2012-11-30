@@ -222,8 +222,12 @@ def _to_dict(instance, deep=None, exclude=None, include=None,
             result[relation] = [_to_dict(inst, rdeep, exclude=newexclude,
                                          include=newinclude)
                                 for inst in relatedvalue]
-        else:
+        elif isinstance(relatedvalue, Query):
             result[relation] = _to_dict(relatedvalue.one(), rdeep,
+                                        exclude=newexclude,
+                                        include=newinclude)
+        else:
+            result[relation] = _to_dict(relatedvalue, rdeep,
                                         exclude=newexclude,
                                         include=newinclude)
     return result
@@ -885,6 +889,10 @@ class API(ModelView):
         if self.paginate:
             # get the page number (first page is page 1)
             page_num = int(request.args.get('page', 1))
+            pagesize_num = int(request.args.get('pagesize', 0))
+            if pagesize_num > 0:
+                self.results_per_page = pagesize_num
+                
             start = (page_num - 1) * self.results_per_page
             end = min(num_results, start + self.results_per_page)
             total_pages = int(math.ceil(num_results / self.results_per_page))
@@ -1022,8 +1030,10 @@ class API(ModelView):
         # Looking for what we're going to set on the model right now
         colkeys = cols.keys()
         paramkeys = params.keys()
+        field_list = set(colkeys).intersection(paramkeys)
         props = set(colkeys).intersection(paramkeys).difference(relations)
 
+        params = dict((field, params[field]) for field in field_list)
         # Special case: if there are any dates, convert the string form of the
         # date into an instance of the Python ``datetime`` object.
         params = self._strings_to_dates(params)
@@ -1099,7 +1109,13 @@ class API(ModelView):
             assert query.count() == 1, 'Multiple rows with same ID'
 
         relations = self._update_relations(query, data)
-        field_list = frozenset(data) ^ relations
+        #field_list = frozenset(data) ^ relations
+        #params = dict((field, data[field]) for field in field_list)
+
+        cols = _get_columns(self.model)
+        colkeys = cols.keys()
+        paramkeys = data.keys()
+        field_list = set(colkeys).intersection(paramkeys).difference(relations)
         params = dict((field, data[field]) for field in field_list)
 
         # Special case: if there are any dates, convert the string form of the
@@ -1112,6 +1128,7 @@ class API(ModelView):
             if params:
                 for item in query.all():
                     for param, value in params.iteritems():
+                        print param, value
                         setattr(item, param, value)
                     num_modified += 1
             self.session.commit()

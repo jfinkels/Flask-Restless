@@ -61,7 +61,7 @@ def tearDownModule():
         os.close(DB['fd'])
         DB['fd'] = None
     if DB['filename']:
-        os.unlink(DB['filename'])
+        #os.unlink(DB['filename'])
         DB['filename'] = None
 
 
