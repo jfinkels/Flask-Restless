@@ -14,33 +14,154 @@ from __future__ import with_statement
 from datetime import date
 from datetime import datetime
 from unittest2 import TestSuite
+from unittest2 import skipUnless
 
 from flask import json
+try:
+    from flask.ext.sqlalchemy import SQLAlchemy
+except:
+    has_flask_sqlalchemy = False
+else:
+    has_flask_sqlalchemy = True
 from sqlalchemy.exc import OperationalError
 
+from flask.ext.restless.manager import APIManager
+from flask.ext.restless.manager import IllegalArgumentError
 from flask.ext.restless.views import _evaluate_functions as evaluate_functions
 from flask.ext.restless.views import _get_columns
 from flask.ext.restless.views import _get_or_create
 from flask.ext.restless.views import _get_relations
 from flask.ext.restless.views import _to_dict
-from flask.ext.restless.manager import IllegalArgumentError
 
-from .helpers import setUpModule
-from .helpers import tearDownModule
+from .helpers import FlaskTestBase
 from .helpers import TestSupport
 from .helpers import TestSupportPrefilled
 
 
 __all__ = ['ModelTestCase', 'FunctionEvaluationTest', 'FunctionAPITestCase',
-           'APITestCase']
+           'APITestCase', 'FSAModelTest']
 
 
 dumps = json.dumps
 loads = json.loads
 
 
+class FSAModelTest(FlaskTestBase):
+    """Tests for functions which operate on Flask-SQLAlchemy models."""
+
+    def setUp(self):
+        """Creates the Flask-SQLAlchemy database and models."""
+        super(FSAModelTest, self).setUp()
+
+        db = SQLAlchemy(self.flaskapp)
+
+        class User(db.Model):
+            id = db.Column(db.Integer, primary_key=True)
+
+        class Pet(db.Model):
+            id = db.Column(db.Integer, primary_key=True)
+            ownerid = db.Column(db.Integer, db.ForeignKey(User.id))
+            owner = db.relationship(User, backref=db.backref('pets'))
+
+        class LazyUser(db.Model):
+            id = db.Column(db.Integer, primary_key=True)
+
+        class LazyPet(db.Model):
+            id = db.Column(db.Integer, primary_key=True)
+            ownerid = db.Column(db.Integer, db.ForeignKey(LazyUser.id))
+            owner = db.relationship(LazyUser,
+                                    backref=db.backref('pets', lazy='dynamic'))
+
+        self.User = User
+        self.Pet = Pet
+        self.LazyUser = LazyUser
+        self.LazyPet = LazyPet
+
+        self.db = db
+        self.db.create_all()
+
+        self.manager = APIManager(self.flaskapp, flask_sqlalchemy_db=self.db)
+
+    def tearDown(self):
+        """Drops all tables."""
+        self.db.drop_all()
+
+    def test_get(self):
+        """Test for the :meth:`views.API.get` method with models defined using
+        Flask-SQLAlchemy with both dynamically loaded and static relationships.
+
+        """
+        # create the API endpoint
+        self.manager.create_api(self.User)
+        self.manager.create_api(self.LazyUser)
+        self.manager.create_api(self.Pet)
+        self.manager.create_api(self.LazyPet)
+
+        response = self.app.get('/api/user')
+        self.assertEqual(200, response.status_code)
+        response = self.app.get('/api/lazy_user')
+        self.assertEqual(200, response.status_code)
+        response = self.app.get('/api/pet')
+        self.assertEqual(200, response.status_code)
+        response = self.app.get('/api/lazy_pet')
+        self.assertEqual(200, response.status_code)
+
+        # create a user with two pets
+        owner = self.User()
+        pet1 = self.Pet()
+        pet2 = self.Pet()
+        pet1.owner = owner
+        pet2.owner = owner
+        self.db.session.add_all([owner, pet1, pet2])
+        self.db.session.commit()
+
+        response = self.app.get('/api/user/%d' % owner.id)
+        self.assertEqual(200, response.status_code)
+        data = loads(response.data)
+        self.assertEqual(2, len(data['pets']))
+        for pet in data['pets']:
+            self.assertEqual(owner.id, pet['ownerid'])
+
+        response = self.app.get('/api/pet/1')
+        self.assertEqual(200, response.status_code)
+        data = loads(response.data)
+        self.assertFalse(isinstance(data['owner'], list))
+        self.assertEqual(owner.id, data['ownerid'])
+
+        # create a lazy user with two lazy pets
+        owner = self.LazyUser()
+        pet1 = self.LazyPet()
+        pet2 = self.LazyPet()
+        pet1.owner = owner
+        pet2.owner = owner
+        self.db.session.add_all([owner, pet1, pet2])
+        self.db.session.commit()
+
+        response = self.app.get('/api/lazy_user/%d' % owner.id)
+        self.assertEqual(200, response.status_code)
+        data = loads(response.data)
+        self.assertEqual(2, len(data['pets']))
+        for pet in data['pets']:
+            self.assertEqual(owner.id, pet['ownerid'])
+
+        response = self.app.get('/api/lazy_pet/1')
+        self.assertEqual(200, response.status_code)
+        data = loads(response.data)
+        self.assertFalse(isinstance(data['owner'], list))
+        self.assertEqual(owner.id, data['ownerid'])
+
+
+# skipUnless should be used as a decorator, but Python 2.5 doesn't have
+# decorators.
+FSATest = skipUnless(has_flask_sqlalchemy,
+                     'Flask-SQLAlchemy not found.')(FSAModelTest)
+
+
 class ModelTestCase(TestSupport):
-    """Provides tests for helper functions which operate on models."""
+    """Provides tests for helper functions which operate on pure SQLAlchemy
+    models.
+
+    """
 
     def test_get_columns(self):
         """Test for getting the names of columns as strings."""
@@ -105,6 +226,7 @@ class ModelTestCase(TestSupport):
         person_dict = _to_dict(person, deep={'computers': []})
         computer_dict = _to_dict(computer, deep={'owner': None})
         self.assertEqual(sorted(person_dict), ['computers', 'id', 'name'])
+        self.assertFalse(isinstance(computer_dict['owner'], list))
         self.assertEqual(sorted(computer_dict), ['id', 'name', 'owner',
                                                  'ownerid'])
         expected_person = _to_dict(person)
@@ -321,6 +443,15 @@ class APITestCase(TestSupport):
         inst = _to_dict(person, deep)
         self.assertEqual(loads(response.data), inst)
 
+    def test_post_bad_parameter(self):
+        """Tests that attempting to make a :http:method:`post` request with a
+        form parameter which does not exist on the specified model responds
+        with an error message.
+
+        """
+        response = self.app.post('/api/person', data=dumps(dict(bogus=0)))
+        self.assertEqual(400, response.status_code)
+
     def test_post_nullable_date(self):
         """Tests the creation of a model with a nullable date field."""
         self.manager.create_api(self.Star, methods=['GET', 'POST'])
@@ -447,6 +578,17 @@ class APITestCase(TestSupport):
         response = self.app.patch('/api/person/' + str(personid), data='')
         self.assertEqual(response.status_code, 400)
 
+    def test_patch_bad_parameter(self):
+        """Tests that attempting to make a :http:method:`patch` request with a
+        form parameter which does not exist on the specified model responds
+        with an error message.
+
+        """
+        response = self.app.post('/api/person', data=dumps({}))
+        self.assertEqual(201, response.status_code)
+        response = self.app.patch('/api/person/1', data=dumps(dict(bogus=0)))
+        self.assertEqual(400, response.status_code)
+
     def test_patch_many(self):
         """Test for updating a collection of instances of the model using the
         :http:method:`patch` method.
@@ -503,6 +645,32 @@ class APITestCase(TestSupport):
         resp = self.app.get('/api/person/1')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(loads(resp.data)['age'], 24)
+
+    def test_patch_set_submodel(self):
+        """Test for assigning a list to a relation of a model using
+        :http:method:`patch`.
+
+        """
+        response = self.app.post('/api/person', data=dumps({}))
+        self.assertEqual(response.status_code, 201)
+        data = {'computers': [{'name': u'lixeiro', 'vendor': u'Lemote'},
+                              {'name': u'foo', 'vendor': u'bar'}]}
+        response = self.app.patch('/api/person/1', data=dumps(data))
+        self.assertEqual(200, response.status_code)
+        data = json.loads(response.data)
+        self.assertEqual(2, len(data['computers']))
+        self.assertEqual(u'lixeiro', data['computers'][0]['name'])
+        self.assertEqual(u'foo', data['computers'][1]['name'])
+        data = {'computers': [{'name': u'hey', 'vendor': u'you'},
+                              {'name': u'big', 'vendor': u'money'},
+                              {'name': u'milk', 'vendor': u'chocolate'}]}
+        response = self.app.patch('/api/person/1', data=dumps(data))
+        self.assertEqual(200, response.status_code)
+        data = json.loads(response.data)
+        self.assertEqual(3, len(data['computers']))
+        self.assertEqual(u'hey', data['computers'][0]['name'])
+        self.assertEqual(u'big', data['computers'][1]['name'])
+        self.assertEqual(u'milk', data['computers'][2]['name'])
 
     def test_patch_add_submodel(self):
         """Test for updating a single instance of the model by adding a related
@@ -879,6 +1047,22 @@ class APITestCase(TestSupport):
         self.assertEqual(len(loads(response.data)['objects']), 25)
         self.assertEqual(loads(response.data)['total_pages'], 1)
 
+    def test_num_results(self):
+        """Tests that a request for (a subset of) all instances of a model
+        includes the total number of results as part of the JSON response.
+
+        """
+        self.manager.create_api(self.Person)
+        for i in range(25):
+            d = dict(name=unicode('person%s' % i))
+            response = self.app.post('/api/person', data=dumps(d))
+            self.assertEqual(response.status_code, 201)
+        response = self.app.get('/api/person')
+        self.assertEqual(response.status_code, 200)
+        data = loads(response.data)
+        self.assertIn('num_results', data)
+        self.assertEqual(data['num_results'], 25)
+
     def test_alternate_primary_key(self):
         """Tests that models with primary keys which are not ``id`` columns are
         accessible via their primary keys.
@@ -921,6 +1105,7 @@ def load_tests(loader, standard_tests, pattern):
     """Returns the test suite for this module."""
     suite = TestSuite()
     suite.addTest(loader.loadTestsFromTestCase(ModelTestCase))
+    suite.addTest(loader.loadTestsFromTestCase(FSAModelTest))
     suite.addTest(loader.loadTestsFromTestCase(FunctionAPITestCase))
     suite.addTest(loader.loadTestsFromTestCase(FunctionEvaluationTest))
     suite.addTest(loader.loadTestsFromTestCase(APITestCase))

@@ -218,18 +218,20 @@ def _to_dict(instance, deep=None, exclude=None, include=None,
         elif (include_relations is not None and
               relation in include_relations):
             newinclude = include_relations[relation]
-        if isinstance(relatedvalue, list):
+        # Do some black magic on SQLAlchemy to decide if the related instance
+        # should be rendered as a list or as a single object.
+        uselist = instance._sa_class_manager[relation].property.uselist
+        if uselist:
             result[relation] = [_to_dict(inst, rdeep, exclude=newexclude,
                                          include=newinclude)
                                 for inst in relatedvalue]
-        elif isinstance(relatedvalue, Query):
-            result[relation] = _to_dict(relatedvalue.one(), rdeep,
-                                        exclude=newexclude,
-                                        include=newinclude)
-        else:
-            result[relation] = _to_dict(relatedvalue, rdeep,
-                                        exclude=newexclude,
-                                        include=newinclude)
+            continue
+        # If the related value is dynamically loaded, resolve the query to get
+        # the single instance.
+        if isinstance(relatedvalue, Query):
+            relatedvalue = relatedvalue.one()
+        result[relation] = _to_dict(relatedvalue, rdeep, exclude=newexclude,
+                                    include=newinclude)
     return result
 
 
@@ -625,31 +627,44 @@ class API(ModelView):
                 getattr(instance, relationname).remove(subinst)
             if remove:
                 self.session.delete(subinst)
-    def _override_from_relation(self, query, relationname, tooverride=None):
+    def _set_on_relation(self, query, relationname, toset=None):
+        """Sets the value of the relation specified by `relationname` on each
+        instance specified by `query` to have the new or existing related
+        models specified by `toset`.
+
+        This function does not commit the changes made to the database. The
+        calling function has that responsibility.
+
+        `query` is a SQLAlchemy query instance that evaluates to all instances
+        of the model specified in the constructor of this class that should be
+        updated.
+
+        `relationname` is the name of a one-to-many relationship which exists
+        on each model specified in `query`.
+
+        `toset` is a list of dictionaries, each representing the attributes of
+        an existing or new related model to set. If a dictionary contains the
+        key ``'id'``, that instance of the related model will be added.
+        Otherwise, the :classmethod:`~flask.ext.restless.model.get_or_create`
+        class method will be used to get or create a model to set.
+
+        """
         submodel = _get_related_model(self.model, relationname)
         subinst_list = []
-        for dictionary in tooverride or []:
+        for dictionary in toset or []:
             if 'id' in dictionary:
                 subinst = self._get_by(dictionary['id'], submodel)
             else:
                 kw = unicode_keys_to_strings(dictionary)
                 subinst = _get_or_create(self.session, submodel, **kw)[0]
             subinst_list.append(subinst)
-        
         for instance in query:
             setattr(instance, relationname, subinst_list)
-        
+
     # TODO change this to have more sensible arguments
     def _update_relations(self, query, params):
-        """Adds or removes models which are related to the model specified in
-        the constructor of this class.
-
-        If one of the dictionaries specified in ``add`` or ``remove`` includes
-        an ``id`` key, the object with that ``id`` will be attempt to be added
-        or removed. Otherwise, an existing object with the specified attribute
-        values will be attempted to be added or removed. If adding, a new
-        object will be created if a matching object could not be found in the
-        database.
+        """Adds, removes, or sets models which are related to the model
+        specified in the constructor of this class.
 
         This function does not commit the changes made to the database. The
         calling function has that responsibility.
@@ -662,11 +677,20 @@ class API(ModelView):
         updated.
 
         `params` is a dictionary containing a mapping from name of the relation
-        to modify (as a string) to a second dictionary. The inner dictionary
-        contains at most two mappings, one with the key ``'add'`` and one with
-        the key ``'remove'``. Each of these is a mapping to a list of
-        dictionaries which represent the attributes of the object to add to or
-        remove from the relation.
+        to modify (as a string) to either a list or another dictionary. In the
+        former case, the relation will be assigned the instances specified by
+        the elements of the list, which are dictionaries as described below.
+        In the latter case, the inner dictionary contains at most two mappings,
+        one with the key ``'add'`` and one with the key ``'remove'``. Each of
+        these is a mapping to a list of dictionaries which represent the
+        attributes of the object to add to or remove from the relation.
+
+        If one of the dictionaries specified in ``add`` or ``remove`` (or the
+        list to be assigned) includes an ``id`` key, the object with that
+        ``id`` will be attempt to be added or removed. Otherwise, an existing
+        object with the specified attribute values will be attempted to be
+        added or removed. If adding, a new object will be created if a matching
+        object could not be found in the database.
 
         If a dictionary in one of the ``'remove'`` lists contains a mapping
         from ``'__delete__'`` to ``True``, then the removed object will be
@@ -678,15 +702,14 @@ class API(ModelView):
         tochange = frozenset(relations) & frozenset(params)
         for columnname in tochange:
             if isinstance(params[columnname], list):
-                tooverride = params[columnname]
-                self._override_from_relation(query, columnname, tooverride=tooverride)
+                toset = params[columnname]
+                self._set_on_relation(query, columnname, toset=toset)
             else:
                 toadd = params[columnname].get('add', [])
                 toremove = params[columnname].get('remove', [])
-                
                 self._add_to_relation(query, columnname, toadd=toadd)
-                self._remove_from_relation(query, columnname, toremove=toremove)
-            
+                self._remove_from_relation(query, columnname,
+                                           toremove=toremove)
         return tochange
 
     def _handle_validation_exception(self, exception):
@@ -906,7 +929,8 @@ class API(ModelView):
                             include=self.include_columns,
                             include_relations=self.include_relations)
                    for x in instances[start:end]]
-        return jsonify(page=page_num, objects=objects, total_pages=total_pages, num_results=num_results)
+        return jsonify(page=page_num, objects=objects, total_pages=total_pages,
+                       num_results=num_results)
 
     def _check_authentication(self):
         """If the specified HTTP method requires authentication (see the
@@ -1018,7 +1042,12 @@ class API(ModelView):
             params = json.loads(request.data)
         except (TypeError, ValueError, OverflowError):
             return jsonify_status_code(400, message='Unable to decode data')
-
+        # Check for any request parameter naming a column which does not exist
+        # on the current model.
+        for field in params:
+            if not hasattr(self.model, field):
+                msg = "Model does not have field '%s'" % field
+                return jsonify_status_code(400, message=msg)
         # If post_form_preprocessor is specified, call it
         if self.post_form_preprocessor:
             params = self.post_form_preprocessor(params)
@@ -1094,7 +1123,13 @@ class API(ModelView):
         except (TypeError, ValueError, OverflowError):
             # this also happens when request.data is empty
             return jsonify_status_code(400, message='Unable to decode data')
-
+        # Check for any request parameter naming a column which does not exist
+        # on the current model.
+        for field in data:
+            if not hasattr(self.model, field):
+                msg = "Model does not have field '%s'" % field
+                return jsonify_status_code(400, message=msg)
+        # Check if the request is to patch many instances of the current model.
         patchmany = instid is None
         if patchmany:
             try:
@@ -1128,7 +1163,6 @@ class API(ModelView):
             if params:
                 for item in query.all():
                     for param, value in params.iteritems():
-                        print param, value
                         setattr(item, param, value)
                     num_modified += 1
             self.session.commit()

@@ -56,6 +56,7 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 200 OK
 
       {
+        "num_results": 8,
         "total_pages": 3,
         "page": 2,
         "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
@@ -74,6 +75,7 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 200 OK
 
       {
+         "num_results": 8,
          "total_pages": 3,
          "page": 2,
          "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
@@ -122,6 +124,9 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 201 Created
 
       {"id": 1}
+
+   The server will respond with :http:statuscode:`400` if the request specifies
+   a field which does not exist on the model.
 
    To create a new person which includes a related list of **new** computer
    instances via a one-to-many relationship, a request must take the following
@@ -302,6 +307,9 @@ Also suppose we have registered an API for these models at ``/api/person`` and
 
       {"id": 1, "name": "Foobar", "age": 24}
 
+   The server will respond with :http:statuscode:`400` if the request specifies
+   a field which does not exist on the model.
+
    To add an existing object to a one-to-many relationship, a request must take
    the following form.
 
@@ -436,6 +444,41 @@ Also suppose we have registered an API for these models at ``/api/person`` and
         ]
       }
 
+   To set the value of a one-to-many relationship to contain either existing or
+   new instances of the related model, a request must take the following form.
+
+   **Sample request**:
+
+   .. sourcecode:: http
+
+      PATCH /api/person/1 HTTP/1.1
+      Host: example.com
+
+      { "computers":
+          [
+            {"id": 1},
+            {"id": 3},
+            {"manufacturer": "Lenovo", "model": "ThinkPad"}
+          ]
+      }
+
+   **Sample response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+
+      {
+        "id": 1,
+        "name": "Jeffrey",
+        "age": 24,
+        "computers": [
+          {"id": 1, "manufacturer": "Dell", "model": "Inspiron 9300"},
+          {"id": 3, "manufacturer": "Apple", "model": "MacBook"}
+          {"id": 4, "manufacturer": "Lenovo", "model": "ThinkPad"}
+        ]
+      }
+
 Error messages
 --------------
 
@@ -515,7 +558,10 @@ be returned. If ``page`` is specified but pagination has been disabled, this
 parameter will be ignored.
 
 In addition to the ``"objects"`` list, the response JSON object will have a
-``"page"`` key whose value is the current page. For example, a request to
+``"page"`` key whose value is the current page, a ``"num_pages"`` key whose
+value is the total number of pages into which the set of matching instances is
+divided, and a ``"num_results"`` key whose value is the total number of
+instances which match the requested search. For example, a request to
 :http:get:`/api/person?page=2` will result in the following response:
 
 .. sourcecode:: http
@@ -523,7 +569,9 @@ In addition to the ``"objects"`` list, the response JSON object will have a
    HTTP/1.1 200 OK
 
    {
+     "num_results": 8,
      "page": 2,
+     "num_pages": 3,
      "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
    }
 
