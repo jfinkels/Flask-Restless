@@ -482,7 +482,7 @@ class API(ModelView):
                  authentication_function=None, exclude_columns=None,
                  include_columns=None, validation_exceptions=None,
                  results_per_page=10, max_results_per_page=100,
-                 post_form_preprocessor=None, *args, **kw):
+                 preprocessors=None, postprocessors=None, *args, **kw):
         """Instantiates this view with the specified attributes.
 
         `session` is the SQLAlchemy session in which all database transactions
@@ -580,7 +580,8 @@ class API(ModelView):
         self.validation_exceptions = tuple(validation_exceptions or ())
         self.results_per_page = results_per_page
         self.max_results_per_page = max_results_per_page
-        self.post_form_preprocessor = post_form_preprocessor
+        self.preprocessors = preprocessors
+        self.postprocessors = postprocessors
 
     def _add_to_relation(self, query, relationname, toadd=None):
         """Adds a new or existing related model to each model specified by
@@ -884,6 +885,12 @@ class API(ModelView):
         except (TypeError, ValueError, OverflowError):
             return jsonify_status_code(400, message='Unable to decode data')
 
+        # If GET_LIST preprocessors is specified, call it
+        if self.preprocessors and 'GET_LIST'in self.preprocessors:
+            data = self.preprocessors['GET_LIST'](data)
+            if data is None:
+                return jsonify_status_code(403, message='The request was a legal request, but the server is refusing to respond to it.')
+
         # perform a filtered search
         try:
             result = search(self.session, self.model, data)
@@ -1027,6 +1034,13 @@ class API(ModelView):
         inst = self._get_by(instid)
         if inst is None:
             abort(404)
+
+        # If GET_SINGLE preprocessors is specified, call it
+        if self.preprocessors and 'GET_SINGLE' in self.preprocessors:
+            inst = self.preprocessors['GET_SINGLE'](inst)
+            if inst is None:
+                return jsonify_status_code(403, message='The request was a legal request, but the server is refusing to respond to it.')
+
         # create a placeholder for the relations of the returned models
         relations = frozenset(_get_relations(self.model))
         # do not follow relations that will not be included in the response
@@ -1054,6 +1068,13 @@ class API(ModelView):
         """
         self._check_authentication()
         inst = self._get_by(instid)
+
+        # If DELETE preprocessors is specified, call it
+        if self.preprocessors and 'DELETE' in self.preprocessors:
+            inst = self.preprocessors['DELETE'](inst)
+            if inst is None:
+                return jsonify_status_code(403, message='The request was a legal request, but the server is refusing to respond to it.')
+
         if inst is not None:
             self.session.delete(inst)
             self.session.commit()
@@ -1091,9 +1112,11 @@ class API(ModelView):
             if not hasattr(self.model, field):
                 msg = "Model does not have field '%s'" % field
                 return jsonify_status_code(400, message=msg)
-        # If post_form_preprocessor is specified, call it
-        if self.post_form_preprocessor:
-            params = self.post_form_preprocessor(params)
+        # If POST preprocessors is specified, call it
+        if self.preprocessors and 'POST' in self.preprocessors:
+            params = self.preprocessors['POST'](params)
+            if params is None:
+                return jsonify_status_code(403, message='The request was a legal request, but the server is refusing to respond to it.')
 
         # Getting the list of relations that will be added later
         cols = _get_columns(self.model)
@@ -1174,6 +1197,12 @@ class API(ModelView):
         patchmany = instid is None
         if patchmany:
             try:
+                # If PATCH_MANY preprocessors is specified, call it
+                if self.preprocessors and 'PATCH_MANY' in self.preprocessors:
+                    data = self.preprocessors['PATCH_MANY'](data)
+                    if data is None:
+                        return jsonify_status_code(403, message='The request was a legal request, but the server is refusing to respond to it.')
+
                 # create a SQLALchemy Query from the query parameter `q`
                 query = create_query(self.session, self.model, data)
             except:
@@ -1185,6 +1214,13 @@ class API(ModelView):
             if query.count() == 0:
                 abort(404)
             assert query.count() == 1, 'Multiple rows with same ID'
+
+            # If PATCH_SINGLE preprocessors is specified, call it
+            if self.preprocessors and 'PATCH_SINGLE' in self.preprocessors:
+                copy_query = query
+                data = self.preprocessors['PATCH_SINGLE'](copy_query.first(), data)
+                if data is None:
+                    return jsonify_status_code(403, message='The request was a legal request, but the server is refusing to respond to it.')
 
         relations = self._update_relations(query, data)
         field_list = frozenset(data) ^ relations

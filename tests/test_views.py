@@ -1168,27 +1168,6 @@ class APITestCase(TestSupport):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(loads(response.data), dict(name='Earth'))
 
-    def test_post_form_preprocessor(self):
-        """Tests POST method decoration using a custom function."""
-        def decorator_function(params):
-            if params:
-                # just add a new attribute
-                params['other'] = 7
-            return params
-
-        # test for function that decorates parameters with 'other' attribute
-        self.manager.create_api(self.Person, methods=['POST'],
-                                url_prefix='/api/v2',
-                                post_form_preprocessor=decorator_function)
-
-        response = self.app.post('/api/v2/person',
-                                 data=dumps({'name': u'Lincoln', 'age': 23}))
-        self.assertEqual(response.status_code, 201)
-
-        personid = loads(response.data)['id']
-        person = self.session.query(self.Person).filter_by(id=personid).first()
-        self.assertEquals(person.other, 7)
-
     def test_results_per_page(self):
         """Tests that the client can correctly specify the number of results
         appearing per page, in addition to specifying which page of results to
@@ -1271,6 +1250,253 @@ class APITestCase(TestSupport):
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.data.startswith('baz('))
         self.assertTrue(response.data.endswith(')'))
+
+    def test_post_preprocessor(self):
+        """Tests POST method decoration using a custom function."""
+        def decorator_function(params):
+            if params:
+                # just add a new attribute
+                params['other'] = 7
+            return params
+
+        # test for function that decorates parameters with 'other' attribute
+        self.manager.create_api(self.Person, methods=['POST'],
+                                url_prefix='/api/v2',
+                                preprocessors=dict(POST=decorator_function))
+
+        response = self.app.post('/api/v2/person',
+                                 data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.assertEqual(response.status_code, 201)
+
+        personid = loads(response.data)['id']
+        person = self.session.query(self.Person).filter_by(id=personid).first()
+        self.assertEquals(person.other, 7)
+
+    def test_post_preprocessor_permission(self):
+        """Tests POST method decoration using a custom function."""
+
+        def check_permissions(params):
+            current_user_have_permission_to_create_obj = False
+            # check permission current user for obj inst
+            if current_user_have_permission_to_create_obj:
+                return params
+            else:
+                return None
+
+        self.manager.create_api(self.Person, methods=['POST'],
+                                url_prefix='/api/v2',
+                                preprocessors=dict(POST=check_permissions))
+
+        response = self.app.post('/api/v2/person',
+                                 data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.assertEqual(response.status_code, 403)
+
+
+    def test_get_single_preprocessor(self):
+
+        def check_permissions(inst):
+            current_user_have_permission_to_read_obj = False
+            # check permission current user for obj inst
+            if inst and current_user_have_permission_to_read_obj:
+                return inst
+            else:
+                return None
+
+        # recreate the api to allow patch many at /api/v2/person
+        self.manager.create_api(self.Person, methods=['GET', 'POST'],
+                                url_prefix='/api/v3',
+                                preprocessors=dict(GET_SINGLE=check_permissions))
+
+        # Creating some people
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Lucy', 'age': 23}))
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Mary', 'age': 25}))
+
+        response = self.app.get('/api/v3/person/1')
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_list_preprocessor(self):
+
+        def check_permissions(params):
+            current_user_have_permission_to_read_only_objs = [1, 3]
+            if 'filters' not in params:
+                params['filters'] = [{u'name': u'id', u'op': u'in', u'val': current_user_have_permission_to_read_only_objs}]
+            else:
+                params['filters'].append({u'name': u'id', u'op': u'in', u'val': current_user_have_permission_to_read_only_objs})
+            return params
+
+        # recreate the api at /api/v3/person
+        self.manager.create_api(self.Person, methods=['GET', 'POST'],
+                                url_prefix='/api/v3',
+                                preprocessors=dict(GET_LIST=check_permissions))
+
+        # Creating some people
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Lucy', 'age': 23}))
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Mary', 'age': 25}))
+
+        response = self.app.get('/api/v3/person')
+        objs = loads(response.data)['objects']
+        ids = [obj['id'] for obj in objs]
+        self.assertEqual(ids, [1, 3])
+        self.assertEqual(response.status_code, 200)
+
+        search = {
+            'filters': [
+                {'name': 'name', 'val': u'Lincoln', 'op': 'equals'}
+            ],
+        }
+        response = self.app.search('/api/v3/person', dumps(search))
+        num_results = loads(response.data)['num_results']
+
+        self.assertEqual(num_results, 1)
+        self.assertEqual(response.status_code, 200)
+
+
+    def test_delete_preprocessor(self):
+
+        def check_permissions(inst):
+            current_user_have_permission_to_delete_obj = False
+            # check permission current user for obj inst
+            if inst and current_user_have_permission_to_delete_obj:
+                return inst
+            else:
+                return None
+
+        # recreate the api at /api/v4/person
+        self.manager.create_api(self.Person,
+                                url_prefix='/api/v4',
+                                methods=['GET', 'PATCH', 'POST', 'DELETE'],
+                                preprocessors=dict(DELETE=check_permissions))
+
+        # Creating some people
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Lucy', 'age': 23}))
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Mary', 'age': 25}))
+
+        # Try deleting it
+        response = self.app.delete('/api/v4/person/1')
+        self.assertEqual(response.status_code, 403)
+
+        # Making sure it has been not deleted
+        people = self.session.query(self.Person).filter_by(id=1)
+        self.assertEquals(people.count(), 1)
+
+
+    def test_patch_single_preprocessor(self):
+
+        def check_permissions(inst, data):
+            current_user_have_permission_to_update_obj = False
+            # check permission current user for obj inst
+            if current_user_have_permission_to_update_obj:
+                return data
+            else:
+                return None
+
+        # recreate the api at /api/v4/person
+        self.manager.create_api(self.Person,
+                                url_prefix='/api/v4',
+                                methods=['GET', 'PATCH', 'POST', 'DELETE'],
+                                preprocessors=dict(PATCH_SINGLE=check_permissions))
+
+        # Creating some test people
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Lucy', 'age': 23}))
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Mary', 'age': 25}))
+
+        # Try updating people with id=1
+        response = self.app.patch('/api/v4/person/1', data=dumps({'age': 27}))
+        self.assertEqual(response.status_code, 403)
+
+
+    def test_patch_single_preprocessor2(self):
+
+        def check_permissions_and_update_data(inst, data):
+            current_user_have_permission_to_update_obj = True
+            # check permission current user for obj inst
+            if current_user_have_permission_to_update_obj:
+                data['other'] = 27
+                return data
+            else:
+                return None
+
+        # recreate the api at /api/v4/person
+        self.manager.create_api(self.Person,
+                                url_prefix='/api/v4',
+                                methods=['GET', 'PATCH', 'POST', 'DELETE'],
+                                preprocessors=dict(PATCH_SINGLE=check_permissions_and_update_data))
+
+        # Creating some test people
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Lucy', 'age': 23}))
+        self.app.post('/api/v4/person',
+                      data=dumps({'name': u'Mary', 'age': 25}))
+
+        # Try updating people with id=1
+        response = self.app.patch('/api/v4/person/1', data=dumps({'age': 27}))
+        self.assertEqual(response.status_code, 200)
+
+        resp = self.app.get('/api/v4/person/1')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(loads(resp.data)['age'], 27)
+        self.assertEqual(loads(resp.data)['other'], 27)
+
+
+    def test_patch_many_preprocessor(self):
+
+        def check_permissions_and_update_data(params):
+            current_user_have_permission_to_update_all_obj = True
+            # check permission current user for obj inst
+            if current_user_have_permission_to_update_all_obj:
+                params['other'] = 27
+                return params
+            else:
+                return None
+
+        # recreate the api at /api/v3/person
+        self.manager.create_api(self.Person, methods=['GET', 'POST', 'PATCH'],
+                                url_prefix='/api/v3',
+                                allow_patch_many=True,
+                                preprocessors=dict(PATCH_MANY=check_permissions_and_update_data))
+
+        # Creating some people
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Lincoln', 'age': 23}))
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Lucy', 'age': 23}))
+        self.app.post('/api/v3/person',
+                      data=dumps({'name': u'Mary', 'age': 25}))
+
+
+        # Changing the birth date field of the entire collection
+        day, month, year = 15, 9, 1986
+        birth_date = date(year, month, day).strftime('%d/%m/%Y')  # iso8601
+        form = {'birth_date': birth_date}
+        response = self.app.patch('/api/v3/person', data=dumps(form))
+
+
+        # Finally, testing if the change was made
+        response = self.app.get('/api/v3/person')
+        loaded = loads(response.data)['objects']
+        for i in loaded:
+            self.assertEqual(i['birth_date'], ('%s-%s-%s' % (
+                    year, str(month).zfill(2), str(day).zfill(2))))
+            self.assertEqual(i['other'], 27)
+
 
 
 def load_tests(loader, standard_tests, pattern):
