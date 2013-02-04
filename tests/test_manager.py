@@ -9,8 +9,10 @@
 
 """
 import datetime
-from unittest2 import skipUnless
-from unittest2 import TestSuite
+try:
+    from unittest2 import TestSuite, skipUnless
+except ImportError:
+    from unittest import TestSuite, skipUnless
 
 from flask import json
 try:

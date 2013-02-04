@@ -22,8 +22,11 @@ from setuptools import setup
 #: required on Python version 2.5. ``Flask-SQLAlchemy`` is not required, so the
 #: user must install it explicitly.
 requirements = ['flask>=0.7', 'sqlalchemy', 'python-dateutil<2.0']
+test_requirements = []
 if sys.version_info < (2, 6):
     requirements.append('simplejson')
+if sys.version_info < (2, 7):
+    test_requirements.append('unittest2')
 
 
 class run_coverage(Command):
@@ -96,7 +99,7 @@ setup(
     platforms='any',
     packages=['flask_restless'],
     test_suite='tests.suite',
-    tests_require=['unittest2'],
+    tests_require=test_requirements,
     url='http://github.com/jfinkels/flask-restless',
     version='0.9.4-dev',
     zip_safe=False

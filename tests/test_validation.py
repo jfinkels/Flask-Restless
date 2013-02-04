@@ -20,8 +20,10 @@ from sqlalchemy import Column
 from sqlalchemy import Integer
 from sqlalchemy import Unicode
 from sqlalchemy.orm import validates
-from unittest2 import TestSuite
-from unittest2 import skipUnless
+try:
+    from unittest2 import TestSuite, skipUnless
+except ImportError:
+    from unittest import TestSuite, skipUnless
 
 # for SAValidation package on pypi.python.org
 try:

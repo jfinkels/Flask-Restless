@@ -24,6 +24,7 @@
 from __future__ import division
 
 from collections import defaultdict
+import itertools
 import datetime
 import math
 import warnings
@@ -48,6 +49,7 @@ from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm.properties import RelationshipProperty as RelProperty
 from sqlalchemy.orm.query import Query
 from sqlalchemy.sql import func
+from sqlalchemy.ext.hybrid import hybrid_property
 
 from .helpers import partition
 from .helpers import unicode_keys_to_strings
@@ -230,8 +232,11 @@ def _to_dict(instance, deep=None, exclude=None, include=None,
             (include is not None or include_relations is not None):
         raise ValueError('Cannot specify both include and exclude.')
     # create the dictionary mapping column name to value
-    columns = (p.key for p in object_mapper(instance).iterate_properties
-               if isinstance(p, ColumnProperty))
+    columns = itertools.chain(
+        (p.key for p in object_mapper(instance).iterate_properties
+            if isinstance(p, ColumnProperty)),
+        (key for key, value in instance.__class__.__dict__.iteritems()
+            if isinstance(value, hybrid_property)))
     # filter the columns based on exclude and include values
     if exclude is not None:
         columns = (c for c in columns if c not in exclude)

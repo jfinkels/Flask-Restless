@@ -10,7 +10,10 @@
 """
 from __future__ import with_statement
 
-from unittest2 import TestSuite
+try:
+    from unittest2 import TestSuite
+except ImportError:
+    from unittest import TestSuite
 
 from sqlalchemy.orm.exc import MultipleResultsFound
 from sqlalchemy.orm.exc import NoResultFound

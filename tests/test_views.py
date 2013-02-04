@@ -13,8 +13,10 @@ from __future__ import with_statement
 
 from datetime import date
 from datetime import datetime
-from unittest2 import TestSuite
-from unittest2 import skipUnless
+try:
+    from unittest2 import TestSuite, skipUnless
+except ImportError:
+    from unittest import TestSuite, skipUnless
 
 from flask import json
 try:
@@ -208,7 +210,8 @@ class ModelTestCase(TestSupport):
         self.session.commit()
 
         me_dict = _to_dict(me)
-        expectedfields = sorted(['birth_date', 'age', 'id', 'name', 'other'])
+        expectedfields = sorted(['birth_date', 'age', 'id', 'name',
+            'other', 'is_minor'])
         self.assertEqual(sorted(me_dict), expectedfields)
         self.assertEqual(me_dict['name'], u'Lincoln')
         self.assertEqual(me_dict['age'], 24)
@@ -256,6 +259,17 @@ class ModelTestCase(TestSupport):
         self.assertEqual(computers[0]['vendor'], u'Lemote')
         self.assertEqual(computers[0]['buy_date'], now.isoformat())
         self.assertEqual(computers[0]['owner_id'], someone.id)
+
+    def to_dict_hybrid_property(self):
+        """Tests that hybrid properties are correctly serialized by the
+        :meth:`flask_restless.model.Entity.to_dict` method.
+        """
+        young = self.Person(name=u'John', age=15)
+        old = self.Person(name=u'Sally', age=25)
+        self.session.commit()
+
+        self.assertTrue(_to_dict(young)['minor'])
+        self.assertFalse(_to_dict(old)['minor'])
 
     def test_get_or_create(self):
         """Test for :meth:`flask_restless.model.Entity.get_or_create()`."""
