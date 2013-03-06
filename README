@@ -1,8 +1,7 @@
 # Flask-Restless #
 
 ## Features Added ##
- * Additional query filter operators (ILIKE);
- * Returning row count as part of an API Manager result;
+ * Merging with upstream: total_rows -> num_results;
  * Ability to use or_() in query filters:
 
     {name:'closed', op:'eq', val:1},
