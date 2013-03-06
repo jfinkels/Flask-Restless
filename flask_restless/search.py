@@ -17,6 +17,7 @@ import inspect
 
 from .helpers import unicode_keys_to_strings
 from sqlalchemy import or_
+from .helpers import session_query
 
 #: The mapping from operator name (as accepted by the search method) to a
 #: function which returns the SQLAlchemy expression corresponding to that
@@ -365,7 +366,7 @@ class QueryBuilder(object):
 
         """
         # Adding field filters
-        query = session.query(model)
+        query = session_query(session, model)
         # may raise exception here
         filters = QueryBuilder._create_filters(model, search_params.filters)
         for filt in filters:
@@ -379,7 +380,7 @@ class QueryBuilder(object):
             field = getattr(model, val.field)
             direction = getattr(field, val.direction)
             query = query.order_by(direction())
-        query.total_rows=query.count()
+
         # Limit it
         if search_params.limit:
             query = query.limit(search_params.limit)
@@ -443,5 +444,5 @@ def search(session, model, search_params):
     query = create_query(session, model, search_params)
     if is_single:
         # may raise NoResultFound or MultipleResultsFound
-        return (query.one(), 1)
-    return (query.all(), query.total_rows)
+        return query.one()
+    return query.all()

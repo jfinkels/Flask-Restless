@@ -8,41 +8,112 @@ Here you can see the full list of changes between each Flask-Restless release.
    As of version 0.6, Flask-Restless supports both pure SQLAlchemy and
    Flask-SQLAlchemy models. Before that, it supported only Elixir models.
 
-Version 0.8.0-dev
------------------
+Version 0.10.0-dev
+------------------
 
 Not yet released.
 
-- Fixed `issue #94 <https://github.com/jfinkels/flask-restless/issues/94>`_:
-  :func:`views._to_dict` should return a single object instead of a list when
-  resolving dynamically loaded many-to-one relationships.
+- #130: documentation and examples now more clearly show search examples.
+- #113: interpret empty strings for date fields as ``None`` objects.
+- #135: added support for hybrid properties.
+- #141: relax requirement for version of `python-dateutil
+  <http://labix.org/python-dateutil>`_ to be not equal to 2.0 if using Python
+  version 2.6 or 2.7.
+- #146: preprocessors now really execute before other code.
+- #154: authentication function now may raise an exception instead of just
+   returning a Boolean.
+- #139: remove custom code for specifying include and exclude columns as well
+   as authentication code in favor of user-defined pre- and postprocessors
+   (this supercedes the fix from #154).
+- #2: adds basic :http:method:`get` access to one level of relationship depth
+   for models.
+
+Version 0.9.3
+-------------
+
+Released on February 4, 2013.
+
+- Fixes incompatibility with Python 2.5 try/except syntax.
+- #116: handle requests which raise :exc:`~sqlalchemy.exc.IntegrityError`.
+
+Version 0.9.2
+-------------
+
+Released on February 4, 2013.
+
+- #82, #134, #136: added request pre- and postprocessors.
+- #120: adds support for JSON-P callbacks in :http:method:`get` requests.
+
+Version 0.9.1
+-------------
+
+Released on January 17, 2013.
+
+- #126: fix documentation build failure due to bug in a dependency.
+- #127: added "ilike" query operator.
+
+Version 0.9.0
+-------------
+
+Released on January 16, 2013.
+
+- Fixed issue #123: :http:method:`patch` requests to instances which do not
+  exist result in a :http:statuscode:`404` response.
+- Removed ability to provide a :class:`~sqlalchemy.orm.session.Session` class
+  when initializing :class:`APIManager`; provide an instance of the class
+  instead.
+- Changes some dynamically loaded relationships used for testing and in
+  examples to be many-to-one instead of the incorrect one-to-many. Versions of
+  SQLAlchemy after 0.8.0b2 raise an exception when the latter is used.
+- Fixed issue #117: allow adding related instances on :http:method:`patch`
+  requests for one-to-one relationships.
+- Fixed issue #114: fix bug where string representations of integers were
+  converted to integers.
+- Fixed issue #110: enable ``results_per_page`` query parameter for clients,
+  and added ``max_results_per_page`` keyword argument to
+  :meth:`APIManager.create_api`.
+- Fixed issue #109: use `sphinxcontrib-issuetracker`_ to render links to GitHub
+  issues in documentation.
+- Fixed issue #105: added ability to set a list of related model instances on a
+  model.
+- Fixed issue #107: server responds with an error code when a
+  :http:method:`patch` or :http:method:`post` request specifies a field which
+  does not exist on the model.
+- Fixed issue #108: dynamically loaded relationships should now be rendered
+  correctly by the :func:`views._to_dict` function regardless of whether they
+  are a list or a single object.
+
+.. _sphinxcontrib-issuetracker: https://sphinxcontrib-issuetracker.readthedocs.org/en/latest
+
+Version 0.8.0
+-------------
+
+Released on November 19, 2012.
+
+- Fixed issue #104: added ``num_results`` key to paginated JSON responses.
+- Fixed issue #94: :func:`views._to_dict` should return a single object instead
+  of a list when resolving dynamically loaded many-to-one relationships.
 
 Version 0.7.0
 -------------
 
 Released on October 9, 2012.
 
-- Fixed `issue #86 <https://github.com/jfinkels/flask-restless/issues/86>`_:
-  allow specifying include and exclude for related models.
+- Fixed issue #86 allow specifying include and exclude for related models.
 - Added ``exclude_columns`` keyword argument to :meth:`APIManager.create_api`.
-- Fixed `issue #101 <https://github.com/jfinkels/flask-restless/issues/101>`_:
-  ``exclude`` in :func:`views._to_dict` function now correctly excludes
-  requested fields from the returned dictionary.
+- Fixed issue #101: ``exclude`` in :func:`views._to_dict` function now
+  correctly excludes requested fields from the returned dictionary.
 - Added working ``include`` and ``exclude`` functionality to the
   :func:`views._to_dict` function.
-- Fixed `issue #98 <https://github.com/jfinkels/flask-restless/issues/98>`_:
-  :http:method:`get` requests to the function evaluation endpoint should not
-  have a data payload.
-- Added a ``total_pages`` mapping to the JSON response according to
-  `pull request #93
-  <https://github.com/jfinkels/flask-restless/pull/93>`_.
-- Fixed `issue #91 <https://github.com/jfinkels/flask-restless/issues/91>`_:
-  correctly handle :http:method:`post` requests to nullable
+- Fixed issue #98: :http:method:`get` requests to the function evaluation
+  endpoint should not have a data payload.
+- Added a ``total_pages`` mapping to the JSON response according to pull
+  request #93.
+- Fixed issue #91: correctly handle :http:method:`post` requests to nullable
   :class:`~sqlalchemy.DateTime` columns.
-- Fixed `issue #83 <https://github.com/jfinkels/flask-restless/issues/83>`_:
-  allow :http:method:`post` requests with one-to-one related instances.
-- Fixed `issue #79 <https://github.com/jfinkels/flask-restless/issues/79>`_:
-  attempted to access attribute of ``None`` in constructor of
+- Fixed issue #83: allow :http:method:`post` requests with one-to-one related
+  instances.
+- Fixed issue #79: attempted to access attribute of ``None`` in constructor of
   :class:`APIManager`.
 
 Version 0.6
@@ -51,10 +122,9 @@ Version 0.6
 Released on June 20, 2012.
 
 - Added ``post_form_preprocessor`` keyword argument to
-  :meth:`APIManager.create_api`; see `issue #74
-  <https://github.com/jfinkels/flask-restless/pull/74>`_.
-- Fixed `issue #77 <https://github.com/jfinkels/flask-restless/pull/77>`_:
-  validation errors are now correctly handled on :http:method:`PATCH` requests.
+  :meth:`APIManager.create_api`; see issue #74.
+- Fixed issue #77: validation errors are now correctly handled on
+  :http:method:`PATCH` requests.
 - Added support for accessing model instances via arbitrary primary keys,
   instead of requiring an integer column named ``id``.
 - Added example which uses curl as a client.

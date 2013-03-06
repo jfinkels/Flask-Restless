@@ -56,6 +56,7 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 200 OK
 
       {
+        "num_results": 8,
         "total_pages": 3,
         "page": 2,
         "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
@@ -74,6 +75,7 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 200 OK
 
       {
+         "num_results": 8,
          "total_pages": 3,
          "page": 2,
          "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
@@ -90,6 +92,24 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 200 OK
 
       {"id": 1, "name": "Jeffrey", "age": 24}
+
+.. http:get:: /api/person/(int:id)/computers
+
+   Gets a list of all ``Computer`` objects which are owned by the ``Person``
+   object with the specified ID.
+
+   **Sample response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+
+      {
+        "num_results": 2,
+        "total_pages": 1,
+        "page": 1,
+        "objects": [{"id": 1, "vendor": "Apple", "name": "MacBook", ...}, ...]
+      }
 
 .. http:delete:: /api/person/(int:id)
 
@@ -122,6 +142,9 @@ Also suppose we have registered an API for these models at ``/api/person`` and
       HTTP/1.1 201 Created
 
       {"id": 1}
+
+   The server will respond with :http:statuscode:`400` if the request specifies
+   a field which does not exist on the model.
 
    To create a new person which includes a related list of **new** computer
    instances via a one-to-many relationship, a request must take the following
@@ -237,15 +260,20 @@ Also suppose we have registered an API for these models at ``/api/person`` and
 
       {"id": 1}
 
-.. http:patch:: /api/person?q=<searchjson>
-.. http:put:: /api/person/?q=<searchjson>
+.. http:patch:: /api/person
+.. http:put:: /api/person
 
    Sets specified attributes on every instance of ``Person`` which meets the
-   search criteria described in the ``q`` query parameter.
+   search criteria described in the ``q`` parameter.
+
+   The JSON object specified in the body of a :http:method:`patch` request to
+   this endpoint may include a mapping from `q` to the parameters for a search,
+   as described in :ref:`searchformat`. If no `q` key exists, then all
+   instances of the model will be patched.
+
    :http:put:`/api/person` is an alias for :http:patch:`/api/person`, because
    the latter is more semantically correct but the former is part of the core
-   HTTP standard. For more information on the format of the value of the ``q``
-   parameter, see :ref:`searchformat`.
+   HTTP standard.
 
    The response will return a JSON object which specifies the number of
    instances in the ``Person`` database which were modified.
@@ -253,21 +281,17 @@ Also suppose we have registered an API for these models at ``/api/person`` and
    **Sample request**:
 
    Suppose the database contains exactly three people with the letter "y" in
-   their names. Suppose that the client makes a request that has query
-   parameter ``q`` set to the following JSON object (as a string):
-
-   .. sourcecode:: javascript
-
-      { "filters": [{"name": "name", "op": "like", "val": "%y%"}] }
-
-   and with the content of the request:
+   his or her name.
 
    .. sourcecode:: http
 
-      PATCH /api/person/1 HTTP/1.1
+      PATCH /api/person HTTP/1.1
       Host: example.com
 
-      {"age": 1}
+      {
+        "age": 1,
+        "q": {"filters": [{"name": "name", "op": "like", "val": "%y%"}]}
+      }
 
    **Sample response**:
 
@@ -298,12 +322,15 @@ Also suppose we have registered an API for these models at ``/api/person`` and
 
    .. sourcecode:: http
 
-      HTTP/1.1 201 Created
+      HTTP/1.1 200 OK
 
       {"id": 1, "name": "Foobar", "age": 24}
 
-   To add an existing object to a one-to-many relationship, a request must take
-   the following form.
+   The server will respond with :http:statuscode:`400` if the request specifies
+   a field which does not exist on the model.
+
+   To add a list of existing object to a one-to-many relationship, a request
+   must take the following form.
 
    **Sample request**:
 
@@ -331,8 +358,8 @@ Also suppose we have registered an API for these models at ``/api/person`` and
         "computers": [ {"id": 1, "manufacturer": "Dell", "model": "Inspiron"} ]
       }
 
-   To add a new object to a one-to-many relationship, a request must take the
-   following form.
+   To add a list of new objects to a one-to-many relationship, a request must
+   take the following form.
 
    **Sample request**:
 
@@ -343,7 +370,7 @@ Also suppose we have registered an API for these models at ``/api/person`` and
 
       { "computers":
         {
-          "add": [ {"id": 1} ]
+          "add": [ {"manufacturer": "Dell", "model": "Inspiron"} ]
         }
       }
 
@@ -351,6 +378,35 @@ Also suppose we have registered an API for these models at ``/api/person`` and
 
       The response does not denote that a new instance has been created for the
       ``Computer`` model.
+
+   **Sample response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+
+      {
+        "id": 1,
+        "name": "Jeffrey",
+        "age": 24,
+        "computers": [ {"id": 1, "manufacturer": "Dell", "model": "Inspiron"} ]
+      }
+
+   Similarly, to add a new or existing instance of a related model to a
+   one-to-one relationship, a request must take the following form.
+
+   **Sample request**:
+
+   .. sourcecode:: http
+
+      PATCH /api/person/1 HTTP/1.1
+      Host: example.com
+
+      { "computers":
+        {
+          "add": {"id": 1}
+        }
+      }
 
    **Sample response**:
 
@@ -436,6 +492,41 @@ Also suppose we have registered an API for these models at ``/api/person`` and
         ]
       }
 
+   To set the value of a one-to-many relationship to contain either existing or
+   new instances of the related model, a request must take the following form.
+
+   **Sample request**:
+
+   .. sourcecode:: http
+
+      PATCH /api/person/1 HTTP/1.1
+      Host: example.com
+
+      { "computers":
+          [
+            {"id": 1},
+            {"id": 3},
+            {"manufacturer": "Lenovo", "model": "ThinkPad"}
+          ]
+      }
+
+   **Sample response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+
+      {
+        "id": 1,
+        "name": "Jeffrey",
+        "age": 24,
+        "computers": [
+          {"id": 1, "manufacturer": "Dell", "model": "Inspiron 9300"},
+          {"id": 3, "manufacturer": "Apple", "model": "MacBook"}
+          {"id": 4, "manufacturer": "Lenovo", "model": "ThinkPad"}
+        ]
+      }
+
 Error messages
 --------------
 
@@ -502,7 +593,37 @@ the empty JSON object, ``{}``.
 
       {"count__id": 5}
 
-.. _pagination:
+JSON-P callbacks
+----------------
+
+Add a ``callback=myfunc`` query parameter to the request URL on any
+:http:method:`get` requests (including endpoints for function evaluation) to
+have the JSON data of the response wrapped in the Javascript function
+``myfunc``. This can be used to circumvent some cross domain scripting security
+issues. For example, a request like this:
+
+.. sourcecode:: http
+
+   GET /api/person/1?callback=foo HTTP/1.1
+
+will produce a response like this:
+
+.. sourcecode:: http
+
+   HTTP/1.1 200 OK
+
+   foo({"id": 1, "name": "Henry", "age": 10})
+
+Then in your Javascript code, write the function ``foo`` like this:
+
+.. sourcecode:: javascript
+
+   function foo(response) {
+     var name = response.name;
+     console.log(name);
+   }
+
+.. _clientpagination:
 
 Pagination
 ----------
@@ -511,11 +632,19 @@ Responses to :http:method:`get` requests are paginated by default, with at most
 ten objects per page. To request a specific page, add a ``page=N`` query
 parameter to the request URL, where ``N`` is a positive integer (the first page
 is page one). If no ``page`` query parameter is specified, the first page will
-be returned. If ``page`` is specified but pagination has been disabled, this
+be returned.
+
+In order to specify the number of results per page, add the query parameter
+``results_per_page=N`` where ``N`` is a positive integer. If
+``results_per_page`` is greater than the maximum number of results per page as
+configured by the server (see :ref:`serverpagination`), then the query
 parameter will be ignored.
 
 In addition to the ``"objects"`` list, the response JSON object will have a
-``"page"`` key whose value is the current page. For example, a request to
+``"page"`` key whose value is the current page, a ``"num_pages"`` key whose
+value is the total number of pages into which the set of matching instances is
+divided, and a ``"num_results"`` key whose value is the total number of
+instances which match the requested search. For example, a request to
 :http:get:`/api/person?page=2` will result in the following response:
 
 .. sourcecode:: http
@@ -523,7 +652,9 @@ In addition to the ``"objects"`` list, the response JSON object will have a
    HTTP/1.1 200 OK
 
    {
+     "num_results": 8,
      "page": 2,
+     "num_pages": 3,
      "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
    }
 

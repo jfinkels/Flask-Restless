@@ -13,8 +13,9 @@
 """
 
 from flask import Blueprint
-from sqlalchemy.orm import scoped_session
 
+from .helpers import get_related_model
+from .helpers import get_relations
 from .views import API
 from .views import FunctionAPI
 
@@ -185,17 +186,14 @@ class APIManager(object):
         """
         self.app = app
         self.session = session or getattr(flask_sqlalchemy_db, 'session', None)
-        if isinstance(self.session, type):
-            self.session = scoped_session(self.session)
 
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
                              allow_patch_many=False, allow_functions=False,
-                             authentication_required_for=None,
-                             authentication_function=None,
-                             exclude_columns=None, include_columns=None,
                              validation_exceptions=None, results_per_page=10,
-                             post_form_preprocessor=None):
+                             max_results_per_page=100,
+                             post_form_preprocessor=None,
+                             preprocessors=None, postprocessors=None):
         """Creates an returns a ReSTful API interface as a blueprint, but does
         not register it on any :class:`flask.Flask` application.
 
@@ -262,42 +260,28 @@ class APIManager(object):
         if ``False`` by default. Warning: you must not create an API for a
         model whose name is ``'eval'`` if you set this argument to ``True``.
 
-        `authentication_required_for` is a list of HTTP method names (for
-        example, ``['POST', 'PATCH']``) for which authentication must be
-        required before clients can successfully make requests. If this keyword
-        argument is specified, `authentication_function` must also be
-        specified. For more information on requiring authentication, see
-        :ref:`authentication`.
+        `results_per_page` is a positive integer which represents the default
+        number of results which are returned per page. Requests made by clients
+        may override this default by specifying ``results_per_page`` as a query
+        argument. `max_results_per_page` is a positive integer which represents
+        the maximum number of results which are returned per page. This is a
+        "hard" upper bound in the sense that even if a client specifies that
+        greater than `max_results_per_page` should be returned, only
+        `max_results_per_page` results will be returned. For more information,
+        see :ref:`serverpagination`.
 
-        `authentication_function` is a function which accepts no arguments and
-        returns ``True`` if and only if a client is authorized to make a
-        request on an endpoint.
+        .. deprecated:: 0.9.2
+           The `post_form_preprocessor` keyword argument is deprecated in
+           version 0.9.2. It will be removed in version 1.0. Replace code that
+           looks like this::
 
-        If either `include_columns` or `exclude_columns` is not ``None``,
-        exactly one of them must be specified. If both are not ``None``, then
-        this function will raise a :exc:`IllegalArgumentError`.
-        `exclude_columns` must be an iterable of strings specifying the columns
-        of `model` which will *not* be present in the JSON representation of
-        the model provided in response to :http:method:`get` requests.
-        Similarly, `include_columns` specifies the *only* columns which will be
-        present in the returned dictionary. In other words, `exclude_columns`
-        is a blacklist and `include_columns` is a whitelist; you can only use
-        one of them per API endpoint. If either `include_columns` or
-        `exclude_columns` contains a string which does not name a column in
-        `model`, it will be ignored.
+               manager.create_api(Person, post_form_preprocessor=foo)
 
-        If `include_columns` is an iterable of length zero (like the empty
-        tuple or the empty list), then the returned dictionary will be
-        empty. If `include_columns` is ``None``, then the returned dictionary
-        will include all columns not excluded by `exclude_columns`.
+           with code that looks like this::
 
-        See :ref:`includes` for information on specifying included or excluded
-        columns on fields of related models.
+               manager.create_api(Person, preprocessors=dict(POST=[foo]))
 
-        `results_per_page` is a positive integer which represents the number of
-        results which are returned per page. If this is anything except a
-        positive integer, pagination will be disabled (warning: this may result
-        in large responses). For more information, see :ref:`pagination`.
+           See :ref:`processors` for more information and examples.
 
         `post_form_preprocessor` is a callback function which takes
         POST input parameters loaded from JSON and enhances them with other
@@ -305,6 +289,31 @@ class APIManager(object):
         requires to store user identity and for security reasons the identity
         is not read from the post parameters (where malicious user can tamper
         with them) but from the session.
+
+        `preprocessors` is a dictionary mapping strings to lists of
+        functions. Each key is the name of an HTTP method (for example,
+        ``'GET'`` or ``'POST'``). Each value is a list of functions, each of
+        which will be called before any other code is executed when this API
+        receives the corresponding HTTP request. The functions will be called
+        in the order given here. The `postprocessors` keyword argument is
+        essentially the same, except the given functions are called after all
+        other code. For more information on preprocessors and postprocessors,
+        see :ref:`processors`.
+
+        .. versionchanged:: 0.10.0
+           Removed `authentication_required_for` and `authentication_function`
+           as well as the `include_columns` and `exclude_columns` keyword
+           arguments.
+
+           Use the `preprocesors` and `postprocessors` keyword arguments
+           instead. For more information, see :ref:`authentication` and
+           :ref:`includes` for more information.
+
+        .. versionadded:: 0.9.2
+           Added the `preprocessors` and `postprocessors` keyword arguments.
+
+        .. versionadded:: 0.9.0
+           Added the `max_results_per_page` keyword argument.
 
         .. versionadded:: 0.7
            Added the `exclude_columns` keyword argument.
@@ -329,14 +338,6 @@ class APIManager(object):
            Force the model name in the URL to lowercase.
 
         """
-        if authentication_required_for and not authentication_function:
-            msg = ('If authentication_required is specified, so must'
-                   ' authentication_function.')
-            raise IllegalArgumentError(msg)
-        if exclude_columns is not None and include_columns is not None:
-            msg = ('Cannot simultaneously specify both include columns and'
-                   ' exclude columns.')
-            raise IllegalArgumentError(msg)
         if collection_name is None:
             collection_name = model.__tablename__
         # convert all method names to upper case
@@ -356,10 +357,9 @@ class APIManager(object):
         apiname = APIManager.APINAME_FORMAT % collection_name
         # the view function for the API for this model
         api_view = API.as_view(apiname, self.session, model,
-                               authentication_required_for,
-                               authentication_function, exclude_columns,
-                               include_columns, validation_exceptions,
-                               results_per_page, post_form_preprocessor)
+                               validation_exceptions, results_per_page,
+                               max_results_per_page, post_form_preprocessor,
+                               preprocessors, postprocessors)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = self._next_blueprint_name(apiname)
         # add the URL rules to the blueprint: the first is for methods on the
@@ -376,11 +376,22 @@ class APIManager(object):
                                view_func=api_view)
         # the per-instance endpoints will allow both integer and string primary
         # key accesses
-        for converter in ('int', 'string'):
-            instance_endpoint = '%s/<%s:instid>' % (collection_endpoint,
-                                                    converter)
-            blueprint.add_url_rule(instance_endpoint, methods=instance_methods,
+        instance_endpoint = '%s/<instid>' % (collection_endpoint)
+        blueprint.add_url_rule(instance_endpoint, methods=instance_methods,
                                    view_func=api_view)
+        # add endpoints which expose related models
+        for relation_name in get_relations(model):
+            relation = get_related_model(model, relation_name)
+            relation_api_name = apiname + '_' + relation_name
+            relation_api_view = API.as_view(relation_api_name, self.session,
+                                            relation, validation_exceptions,
+                                            results_per_page,
+                                            max_results_per_page,
+                                            post_form_preprocessor,
+                                            preprocessors, postprocessors)
+            endpoint_url = '%s/%s' % (instance_endpoint, relation_name)
+            blueprint.add_url_rule(endpoint_url, methods=['GET'],
+                                   view_func=relation_api_view)
         # if function evaluation is allowed, add an endpoint at /api/eval/...
         # which responds only to GET requests and responds with the result of
         # evaluating functions on all instances of the specified model

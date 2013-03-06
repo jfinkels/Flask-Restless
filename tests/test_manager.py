@@ -21,11 +21,8 @@ else:
     has_flask_sqlalchemy = True
 
 from flask.ext.restless import APIManager
-from flask.ext.restless.views import _get_columns
 
 from .helpers import FlaskTestBase
-from .helpers import setUpModule
-from .helpers import tearDownModule
 from .helpers import TestSupport
 
 
@@ -157,21 +154,32 @@ class APIManagerTest(TestSupport):
         self.assertNotEqual(response.status_code, 200)
         self.assertEqual(response.status_code, 404)
 
-    def test_include_related(self):
-        """Test for specifying included columns on related models."""
-        date = datetime.date(1999,12,31)
+    def test_includes(self):
+        """Test for specifying included columns on instances and their related
+        models using postprocessors.
+
+        """
+        date = datetime.date(1999, 12, 31)
         person = self.Person(name='Test', age=10, other=20, birth_date=date)
         computer = self.Computer(name='foo', vendor='bar', buy_date=date)
         self.session.add(person)
         person.computers.append(computer)
         self.session.commit()
 
-        include = frozenset(['name', 'age', 'computers', 'computers.id',
-                             'computers.name'])
-        self.manager.create_api(self.Person, include_columns=include)
-        include = frozenset(['name', 'age', 'computers.id', 'computers.name'])
-        self.manager.create_api(self.Person, url_prefix='/api2',
-                                include_columns=include)
+        def include_columns(params):
+            newparams = {}
+            newparams['name'] = params['name']
+            newparams['age'] = params['age']
+            newparams['computers'] = []
+            for computer in params['computers']:
+                newcomputer = {}
+                newcomputer['id'] = computer['id']
+                newcomputer['name'] = computer['name']
+                newparams['computers'].append(newcomputer)
+            return newparams
+
+        postprocessors = dict(GET_SINGLE=[include_columns])
+        self.manager.create_api(self.Person, postprocessors=postprocessors)
 
         response = self.app.get('/api/person/%s' % person.id)
         person_dict = loads(response.data)
@@ -183,135 +191,6 @@ class APIManagerTest(TestSupport):
             self.assertIn(column, person_dict['computers'][0])
         for column in 'vendor', 'owner_id', 'buy_date':
             self.assertNotIn(column, person_dict['computers'][0])
-
-        response = self.app.get('/api2/person/%s' % person.id)
-        self.assertNotIn('computers', loads(response.data))
-
-    def test_exclude_related(self):
-        """Test for specifying excluded columns on related models."""
-        date = datetime.date(1999,12,31)
-        person = self.Person(name='Test', age=10, other=20, birth_date=date)
-        computer = self.Computer(name='foo', vendor='bar', buy_date=date)
-        self.session.add(person)
-        person.computers.append(computer)
-        self.session.commit()
-
-        exclude = frozenset(['name', 'age', 'computers', 'computers.id',
-                             'computers.name'])
-        self.manager.create_api(self.Person, exclude_columns=exclude)
-        exclude = frozenset(['name', 'age', 'computers.id', 'computers.name'])
-        self.manager.create_api(self.Person, url_prefix='/api2',
-                                exclude_columns=exclude)
-
-        response = self.app.get('/api/person/%s' % person.id)
-        person_dict = loads(response.data)
-        for column in 'name', 'age', 'computers':
-            self.assertNotIn(column, person_dict)
-        for column in 'id', 'other', 'birth_date':
-            self.assertIn(column, person_dict)
-
-        response = self.app.get('/api2/person/%s' % person.id)
-        person_dict = loads(response.data)
-        self.assertIn('computers', person_dict)
-        for column in 'id', 'name':
-            self.assertNotIn(column, person_dict['computers'][0])
-        for column in 'vendor', 'owner_id', 'buy_date':
-            self.assertIn(column, person_dict['computers'][0])
-
-    def test_include_columns(self):
-        """Tests that the `include_columns` argument specifies which columns to
-        return in the JSON representation of instances of the model.
-
-        """
-        all_columns = _get_columns(self.Person)
-        # allow all
-        self.manager.create_api(self.Person, include_columns=None,
-                                url_prefix='/all')
-        self.manager.create_api(self.Person, include_columns=all_columns,
-                                url_prefix='/all2')
-        # allow some
-        self.manager.create_api(self.Person, include_columns=('name', 'age'),
-                                url_prefix='/some')
-        # allow none
-        self.manager.create_api(self.Person, include_columns=(),
-                                url_prefix='/none')
-
-        # create a test person
-        self.manager.create_api(self.Person, methods=['POST'],
-                                url_prefix='/add')
-        d = dict(name=u'Test', age=10, other=20,
-                 birth_date=datetime.date(1999, 12, 31).isoformat())
-        response = self.app.post('/add/person', data=dumps(d))
-        self.assertEqual(response.status_code, 201)
-        personid = loads(response.data)['id']
-
-        # get all
-        response = self.app.get('/all/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            self.assertIn(column, loads(response.data))
-        response = self.app.get('/all2/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            self.assertIn(column, loads(response.data))
-
-        # get some
-        response = self.app.get('/some/person/%s' % personid)
-        for column in 'name', 'age':
-            self.assertIn(column, loads(response.data))
-        for column in 'other', 'birth_date', 'computers':
-            self.assertNotIn(column, loads(response.data))
-
-        # get none
-        response = self.app.get('/none/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            self.assertNotIn(column, loads(response.data))
-
-    def test_exclude_columns(self):
-        """Tests that the ``exclude_columns`` argument specifies which columns
-        to exclude in the JSON representation of instances of the model.
-
-        """
-        all_columns = _get_columns(self.Person)
-        # allow all
-        self.manager.create_api(self.Person, exclude_columns=None,
-                                url_prefix='/all')
-        self.manager.create_api(self.Person, exclude_columns=(),
-                                url_prefix='/all2')
-        # allow some
-        exclude = ('other', 'birth_date', 'computers')
-        self.manager.create_api(self.Person, exclude_columns=exclude,
-                                url_prefix='/some')
-        # allow none
-        self.manager.create_api(self.Person, exclude_columns=all_columns,
-                                url_prefix='/none')
-
-        # create a test person
-        self.manager.create_api(self.Person, methods=['POST'],
-                                url_prefix='/add')
-        d = dict(name=u'Test', age=10, other=20,
-                 birth_date=datetime.date(1999, 12, 31).isoformat())
-        response = self.app.post('/add/person', data=dumps(d))
-        self.assertEqual(response.status_code, 201)
-        personid = loads(response.data)['id']
-
-        # get all
-        response = self.app.get('/all/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            self.assertIn(column, loads(response.data))
-        response = self.app.get('/all2/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            self.assertIn(column, loads(response.data))
-
-        # get some
-        response = self.app.get('/some/person/%s' % personid)
-        for column in 'name', 'age':
-            self.assertIn(column, loads(response.data))
-        for column in 'other', 'birth_date', 'computers':
-            self.assertNotIn(column, loads(response.data))
-
-        # get none
-        response = self.app.get('/none/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            self.assertNotIn(column, loads(response.data))
 
     def test_different_urls(self):
         """Tests that establishing different URL endpoints for the same model
@@ -382,19 +261,35 @@ class APIManagerTest(TestSupport):
         response = self.app.get('/get/person/1')
         self.assertEqual(response.status_code, 404)
 
-    def test_session_class(self):
-        """Test for providing a session class instead of a sesssion instance.
+    def test_max_results_per_page(self):
+        """Test for specifying the ``max_results_per_page`` keyword argument.
 
         """
-        manager = APIManager(self.flaskapp, session=self.Session)
-        manager.create_api(self.Person, methods=['GET', 'POST'])
-        response = self.app.get('/api/person')
-        self.assertEqual(response.status_code, 200)
-        response = self.app.post('/api/person', data=dumps(dict(name='foo')))
-        self.assertEqual(response.status_code, 201)
-        response = self.app.get('/api/person/1')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(loads(response.data)['id'], 1)
+        self.manager.create_api(self.Person, methods=['GET', 'POST'],
+                                max_results_per_page=15)
+        for n in range(100):
+            response = self.app.post('/api/person', data=dumps({}))
+            self.assertEqual(201, response.status_code)
+        response = self.app.get('/api/person?results_per_page=20')
+        self.assertEqual(200, response.status_code)
+        data = loads(response.data)
+        self.assertEqual(15, len(data['objects']))
+
+    def test_expose_relations(self):
+        """Tests that relations are exposed at a URL which is a child of the
+        instance URL.
+
+        """
+        date = datetime.date(1999, 12, 31)
+        person = self.Person(name='Test', age=10, other=20, birth_date=date)
+        computer = self.Computer(name='foo', vendor='bar', buy_date=date)
+        self.session.add(person)
+        person.computers.append(computer)
+        self.session.commit()
+
+        self.manager.create_api(self.Person)
+        response = self.app.get('/api/person/1/computers')
+        self.assertEqual(200, response.status_code)
 
 
 class FSATest(FlaskTestBase):
@@ -424,6 +319,9 @@ class FSATest(FlaskTestBase):
             vendor = db.Column(db.Unicode)
             buy_date = db.Column(db.DateTime)
             owner_id = db.Column(db.Integer, db.ForeignKey('person.id'))
+            owner = db.relationship('Person',
+                                    backref=db.backref('computers',
+                                                       lazy='dynamic'))
 
         class Person(db.Model):
             id = db.Column(db.Integer, primary_key=True)
@@ -431,9 +329,7 @@ class FSATest(FlaskTestBase):
             age = db.Column(db.Float)
             other = db.Column(db.Float)
             birth_date = db.Column(db.Date)
-            computers = db.relationship('Computer',
-                                        backref=db.backref('owner',
-                                                           lazy='dynamic'))
+
         self.Person = Person
         self.Computer = Computer
 

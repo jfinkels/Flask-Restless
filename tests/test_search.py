@@ -19,8 +19,6 @@ from flask.ext.restless.search import create_query
 from flask.ext.restless.search import search
 from flask.ext.restless.search import SearchParameters
 
-from .helpers import setUpModule
-from .helpers import tearDownModule
 from .helpers import TestSupportPrefilled
 
 
@@ -136,6 +134,9 @@ class OperatorsTest(TestSupportPrefilled):
             result = search(self.session, self.Person, d)
             self.assertEqual(len(result), 3)
         d = dict(filters=[dict(name='name', op='like', val=u'%y%')])
+        result = search(self.session, self.Person, d)
+        self.assertEqual(len(result), 3)
+        d = dict(filters=[dict(name='name', op='ilike', val=u'%Y%')])
         result = search(self.session, self.Person, d)
         self.assertEqual(len(result), 3)
         d = dict(filters=[dict(name='age', op='in', val=[19, 21, 23])])

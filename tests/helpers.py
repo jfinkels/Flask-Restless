@@ -4,25 +4,11 @@
 
     Provides helper functions for unit tests in this package.
 
-    New test modules whose test classes inherit from :class:`TestSupport` must
-    import the :func:`setUpModule` and :func:`tearDownModule` functions, which
-    create and destroy a file for a test database, respectively, from this
-    module::
-
-        from .helpers import setUpModule
-        from .helpers import tearDownModule
-
-    This makes :mod:`unittest` execute these functions once per test module,
-    which saves some disk usage and should theoretically cause the tests to run
-    more quickly.
-
     :copyright: 2012 Jeffrey Finkelstein <jeffrey.finkelstein@gmail.com>
     :license: GNU AGPLv3+ or BSD
 
 """
 import datetime
-import os
-import tempfile
 from unittest2 import TestCase
 
 from flask import Flask
@@ -35,34 +21,13 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy import Unicode
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
 
 from flask.ext.restless import APIManager
-
-#: The file descriptor and filename of the database which will be used in the
-#: tests.
-DB = dict(fd=None, filename=None)
-
-
-def setUpModule():
-    """Creates a temporary file which will contain the database to use in the
-    tests.
-
-    """
-    DB['fd'], DB['filename'] = tempfile.mkstemp()
-
-
-def tearDownModule():
-    """Closes and unlinks the database file used in the tests."""
-    if DB['fd']:
-        os.close(DB['fd'])
-        DB['fd'] = None
-    if DB['filename']:
-        os.unlink(DB['filename'])
-        DB['filename'] = None
 
 
 class FlaskTestBase(TestCase):
@@ -76,7 +41,7 @@ class FlaskTestBase(TestCase):
         app = Flask(__name__)
         app.config['DEBUG'] = True
         app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///%s' % DB['filename']
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite://'
         self.flaskapp = app
 
         # create the test client
@@ -128,18 +93,22 @@ class TestSupport(FlaskTestBase):
             birth_date = Column(Date)
             computers = relationship('Computer')
 
+            @hybrid_property
+            def is_minor(self):
+                return self.age < 18
+
         class LazyComputer(self.Base):
             __tablename__ = 'lazycomputer'
             id = Column(Integer, primary_key=True)
             name = Column(Unicode)
             ownerid = Column(Integer, ForeignKey('lazyperson.id'))
+            owner = relationship('LazyPerson',
+                                 backref=backref('computers', lazy='dynamic'))
 
         class LazyPerson(self.Base):
             __tablename__ = 'lazyperson'
             id = Column(Integer, primary_key=True)
             name = Column(Unicode)
-            computers = relationship('LazyComputer',
-                                     backref=backref('owner', lazy='dynamic'))
 
         class Planet(self.Base):
             __tablename__ = 'planet'

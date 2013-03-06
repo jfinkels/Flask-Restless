@@ -8,12 +8,14 @@
 #    side to make HTTP requests to the server.
 #
 #    In order to use this script, you must first run the quickstart server
-#    example from this directory:
+#    example from this directory::
 #
 #        PYTHONPATH=.. python quickstart.py
 #
 #    Now run this script from this directory (that is, the ``examples/``
-#    directory) see some example requests made from curl.
+#    directory) to see some example requests made from curl::
+#
+#        ./curl.sh
 #
 #    The important thing to note in this example is that the client must
 #    remember to specify the ``application/json`` MIME type when sending
@@ -49,4 +51,18 @@ echo
 echo "Making a GET request for the added person..."
 echo
 curl -H "Content-type: application/json" http://$HOST/api/person/1
+echo
+
+echo
+echo
+echo "Searching for all people whose names contain a 'y'..."
+echo
+# Note: don't include spaces when specifying the parameters of the search with
+# the `d` argument. If you want spaces, encode them using URL encoding (that
+# is, use "%20" instead of " ").
+curl \
+  -G \
+  -H "Content-type: application/json" \
+  -d "q={\"filters\":[{\"name\":\"name\",\"op\":\"like\",\"val\":\"%y%\"}]}" \
+  http://$HOST/api/person
 echo
