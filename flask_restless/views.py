@@ -915,7 +915,15 @@ class API(ModelView):
         """
         return self._query_by_primary_key(primary_key_value, model).first()
 
-    def _inst_to_dict(self, instid):
+    def _inst_to_dict(self, inst):
+        """Returns the dictionary representation of the specified instance.
+        """
+        # create a placeholder for the relations of the returned models
+        relations = frozenset(get_relations(self.model))
+        deep = dict((r, {}) for r in relations)
+        return _to_dict(inst, deep)
+
+    def _instid_to_dict(self, instid):
         """Returns the dictionary representation of the instance specified by
         `instid`.
 
@@ -926,10 +934,7 @@ class API(ModelView):
         inst = self._get_by(instid)
         if inst is None:
             abort(404)
-        # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
-        deep = dict((r, {}) for r in relations)
-        return _to_dict(inst, deep)
+        return self._inst_to_dict(inst)
 
     def get(self, instid):
         """Returns a JSON representation of an instance of model with the
@@ -950,7 +955,7 @@ class API(ModelView):
                 return self._search()
             for preprocessor in self.preprocessors['GET_SINGLE']:
                 preprocessor(instid)
-            result = self._inst_to_dict(instid)
+            result = self._instid_to_dict(instid)
             for postprocessor in self.postprocessors['GET_SINGLE']:
                 result = postprocessor(result)
             return jsonpify(result)
@@ -1069,10 +1074,7 @@ class API(ModelView):
             # add the created model to the session
             self.session.add(instance)
             self.session.commit()
-
-            pk_name = str(_primary_key_name(instance))
-            pk_value = getattr(instance, pk_name)
-            result = {pk_name: pk_value}
+            result = self._inst_to_dict(instance)
 
             try:
                 for postprocessor in self.postprocessors['POST']:
@@ -1080,7 +1082,6 @@ class API(ModelView):
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
-
             return jsonify_status_code(201, **result)
         except self.validation_exceptions, exception:
             return self._handle_validation_exception(exception)
@@ -1183,7 +1184,7 @@ class API(ModelView):
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
         else:
-            result = self._inst_to_dict(instid)
+            result = self._instid_to_dict(instid)
             try:
                 for postprocessor in self.postprocessors['PATCH_SINGLE']:
                     result = postprocessor(result)
