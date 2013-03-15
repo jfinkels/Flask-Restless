@@ -189,6 +189,10 @@ def _to_dict(instance, deep=None):
     :func:`!_to_dict` returns a list of the string representations of the
     related instances.
 
+    Note that the relations specified in `deep` are only traversed if
+    they have already been loaded by sqlalchemy. This gives the user a
+    chance to customize how "deep" objects are serialized.
+
     """
     # create a list of names of columns, including hybrid properties
     columns = [p.key for p in object_mapper(instance).iterate_properties
@@ -206,9 +210,15 @@ def _to_dict(instance, deep=None):
     for key, value in result.items():
         if isinstance(value, datetime.date):
             result[key] = value.isoformat()
-    # recursively call _to_dict on each of the `deep` relations
-    deep = deep or {}
-    for relation, rdeep in deep.iteritems():
+
+    # Recursively call _to_dict on each of the `deep` relations after
+    # it has been filtered. We do not want to load any relations that
+    # sqlalchemys normal relationship loading feature would load.
+    loaded_rels = instance.__dict__
+    deep = (deep or {}).iteritems()
+    deep = ((rel, rdeep) for (rel, rdeep) in deep if rel in loaded_rels)
+
+    for relation, rdeep in deep:
         # Get the related value so we can see if it is None, a list, a query
         # (as specified by a dynamic relationship loader), or an actual
         # instance of a model.
