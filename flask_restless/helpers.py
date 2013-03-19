@@ -9,18 +9,12 @@
 
 """
 from sqlalchemy.orm import RelationshipProperty as RelProperty
+from sqlalchemy.ext.associationproxy import AssociationProxy
 
-
-def partition(l, condition):
-    """Returns a pair of lists, the left one containing all elements of `l` for
-    which `condition` is ``True`` and the right one containing all elements of
-    `l` for which `condition` is ``False``.
-
-    `condition` is a function that takes a single argument (each individual
-    element of the list `l`) and returns either ``True`` or ``False``.
-
-    """
-    return filter(condition, l), filter(lambda x: not condition(x), l)
+#: Names of attributes which should definitely not be considered relations when
+#: dynamically computing a list of relations of a SQLAlchemy model.
+BLACKLIST = ('query', 'query_class', '_sa_class_manager',
+             '_decl_class_registry')
 
 
 def unicode_keys_to_strings(dictionary):
@@ -77,8 +71,8 @@ def get_columns(model):
 
 def get_relations(model):
     """Returns a list of relation names of `model` (as a list of strings)."""
-    cols = get_columns(model)
-    return [k for k in cols if isinstance(cols[k].property, RelProperty)]
+    return [k for k in dir(model) if not (k.startswith('__') or k in BLACKLIST)
+            and get_related_model(model, k)]
 
 
 def get_related_model(model, relationname):
@@ -86,4 +80,10 @@ def get_related_model(model, relationname):
     whose name is `relationname`.
 
     """
-    return get_columns(model)[relationname].property.mapper.class_
+    cols = get_columns(model)
+    attr = getattr(model, relationname)
+    if relationname in cols and isinstance(attr.property, RelProperty):
+        return cols[relationname].property.mapper.class_
+    elif isinstance(attr, AssociationProxy):
+        return attr.remote_attr.property.mapper.class_
+    return None

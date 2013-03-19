@@ -54,7 +54,6 @@ from sqlalchemy.ext.associationproxy import AssociationProxy
 from .helpers import get_columns
 from .helpers import get_related_model
 from .helpers import get_relations
-from .helpers import partition
 from .helpers import session_query
 from .helpers import unicode_keys_to_strings
 from .helpers import upper_keys
@@ -191,12 +190,14 @@ def _to_dict(instance, deep=None):
     related instances.
 
     """
-    # create an iterable of names of columns, including hybrid properties
-    columns = itertools.chain(
-        (p.key for p in object_mapper(instance).iterate_properties
-            if isinstance(p, ColumnProperty)),
-        (key for key, value in instance.__class__.__dict__.iteritems()
-            if isinstance(value, hybrid_property)))
+    # create a list of names of columns, including hybrid properties
+    columns = [p.key for p in object_mapper(instance).iterate_properties
+            if isinstance(p, ColumnProperty)]
+    for parent in type(instance).mro():
+        columns.extend(
+            [key for key,value in parent.__dict__.iteritems()
+            if isinstance(value, hybrid_property)]
+        )
     # create a dictionary mapping column name to value
     result = dict((col, getattr(instance, col)) for col in columns)
     # Convert datetime and date objects to ISO 8601 format.
@@ -217,7 +218,12 @@ def _to_dict(instance, deep=None):
             continue
         # Do some black magic on SQLAlchemy to decide if the related instance
         # should be rendered as a list or as a single object.
-        uselist = instance._sa_class_manager[relation].property.uselist
+        if relation in instance._sa_class_manager:
+            uselist = instance._sa_class_manager[relation].property.uselist
+        elif isinstance(getattr(type(instance), relation, None), AssociationProxy):
+            uselist = True
+        else:
+            uselist = False
         if uselist:
             result[relation] = [_to_dict(inst, rdeep) for inst in relatedvalue]
             continue
@@ -915,7 +921,15 @@ class API(ModelView):
         """
         return self._query_by_primary_key(primary_key_value, model).first()
 
-    def _inst_to_dict(self, instid):
+    def _inst_to_dict(self, inst):
+        """Returns the dictionary representation of the specified instance.
+        """
+        # create a placeholder for the relations of the returned models
+        relations = frozenset(get_relations(self.model))
+        deep = dict((r, {}) for r in relations)
+        return _to_dict(inst, deep)
+
+    def _instid_to_dict(self, instid):
         """Returns the dictionary representation of the instance specified by
         `instid`.
 
@@ -926,10 +940,7 @@ class API(ModelView):
         inst = self._get_by(instid)
         if inst is None:
             abort(404)
-        # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
-        deep = dict((r, {}) for r in relations)
-        return _to_dict(inst, deep)
+        return self._inst_to_dict(inst)
 
     def get(self, instid):
         """Returns a JSON representation of an instance of model with the
@@ -950,7 +961,7 @@ class API(ModelView):
                 return self._search()
             for preprocessor in self.preprocessors['GET_SINGLE']:
                 preprocessor(instid)
-            result = self._inst_to_dict(instid)
+            result = self._instid_to_dict(instid)
             for postprocessor in self.postprocessors['GET_SINGLE']:
                 result = postprocessor(result)
             return jsonpify(result)
@@ -1051,7 +1062,7 @@ class API(ModelView):
 
             # Handling relations, a single level is allowed
             for col in set(relations).intersection(paramkeys):
-                submodel = cols[col].property.mapper.class_
+                submodel = get_related_model(self.model, col)
 
                 if type(params[col]) == list:
                     # model has several related objects
@@ -1069,10 +1080,7 @@ class API(ModelView):
             # add the created model to the session
             self.session.add(instance)
             self.session.commit()
-
-            pk_name = str(_primary_key_name(instance))
-            pk_value = getattr(instance, pk_name)
-            result = {pk_name: pk_value}
+            result = self._inst_to_dict(instance)
 
             try:
                 for postprocessor in self.postprocessors['POST']:
@@ -1080,7 +1088,6 @@ class API(ModelView):
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
-
             return jsonify_status_code(201, **result)
         except self.validation_exceptions, exception:
             return self._handle_validation_exception(exception)
@@ -1170,6 +1177,8 @@ class API(ModelView):
             self.session.commit()
         except self.validation_exceptions, exception:
             return self._handle_validation_exception(exception)
+        except IntegrityError, error:
+            return jsonify_status_code(400, message=error.message)
 
         # Perform any necessary postprocessing.
         if patchmany:
@@ -1181,7 +1190,7 @@ class API(ModelView):
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
         else:
-            result = self._inst_to_dict(instid)
+            result = self._instid_to_dict(instid)
             try:
                 for postprocessor in self.postprocessors['PATCH_SINGLE']:
                     result = postprocessor(result)

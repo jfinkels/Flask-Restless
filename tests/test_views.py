@@ -5,7 +5,7 @@
     Provides unit tests for the :mod:`flask_restless.views` module.
 
     :copyright: 2011 by Lincoln de Sousa <lincoln@comum.org>
-    :copyright: 2012 Jeffrey Finkelstein <jeffrey.finkelstein@gmail.com>
+    :copyright: 2012, 2013 Jeffrey Finkelstein <jeffrey.finkelstein@gmail.com>
     :license: GNU AGPLv3+ or BSD
 
 """
@@ -24,22 +24,32 @@ except:
 else:
     has_flask_sqlalchemy = True
 from sqlalchemy import Column
+from sqlalchemy import create_engine
+from sqlalchemy import ForeignKey
+from sqlalchemy import Integer
 from sqlalchemy import Unicode
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.associationproxy import association_proxy as prox
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.orderinglist import ordering_list as ol
+from sqlalchemy.orm import backref
+from sqlalchemy.orm import relationship as rel
+from sqlalchemy.orm import scoped_session
+from sqlalchemy.orm import sessionmaker
 
 from flask.ext.restless.manager import APIManager
-from flask.ext.restless.manager import IllegalArgumentError
 from flask.ext.restless.views import _evaluate_functions as evaluate_functions
 from flask.ext.restless.views import _get_or_create
 from flask.ext.restless.views import _to_dict
 
+from .helpers import DatabaseTestBase
 from .helpers import FlaskTestBase
 from .helpers import TestSupport
 from .helpers import TestSupportPrefilled
 
 
 __all__ = ['ModelTestCase', 'FunctionEvaluationTest', 'FunctionAPITestCase',
-           'APITestCase', 'FSAModelTest']
+           'APITestCase', 'FSAModelTest', 'AssociationProxyTest']
 
 
 dumps = json.dumps
@@ -669,9 +679,10 @@ class APITestCase(TestSupport):
                          {'name': 'name', 'val': u'Lincoln', 'op': 'equals'}
                      ],
                  }
-        # Changing the birth date field for objects where name field equals Lincoln
+        # Changing the birth date field for objects where name field equals
+        # Lincoln
         day, month, year = 15, 9, 1986
-        birth_date = date(year, month, day).strftime('%d/%m/%Y') # iso8601
+        birth_date = date(year, month, day).strftime('%d/%m/%Y')  # iso8601
         form = {'birth_date': birth_date, 'q': search}
         response = self.app.patch('/api/v2/person', data=dumps(form))
         num_modified = loads(response.data)['num_modified']
@@ -718,7 +729,7 @@ class APITestCase(TestSupport):
                               {'name': u'foo', 'vendor': u'bar'}]}
         response = self.app.patch('/api/person/1', data=dumps(data))
         self.assertEqual(200, response.status_code)
-        data = json.loads(response.data)
+        data = loads(response.data)
         self.assertEqual(2, len(data['computers']))
         self.assertEqual(u'lixeiro', data['computers'][0]['name'])
         self.assertEqual(u'foo', data['computers'][1]['name'])
@@ -727,7 +738,7 @@ class APITestCase(TestSupport):
                               {'name': u'milk', 'vendor': u'chocolate'}]}
         response = self.app.patch('/api/person/1', data=dumps(data))
         self.assertEqual(200, response.status_code)
-        data = json.loads(response.data)
+        data = loads(response.data)
         self.assertEqual(3, len(data['computers']))
         self.assertEqual(u'hey', data['computers'][0]['name'])
         self.assertEqual(u'big', data['computers'][1]['name'])
@@ -1275,6 +1286,232 @@ class APITestCase(TestSupport):
         self.assertEqual(400, response.status_code)
 
 
+class AssociationProxyTest(DatabaseTestBase):
+    """Unit tests for models which have a relationship involving an association
+    proxy.
+
+    """
+
+    def setUp(self):
+        """Creates example models which are related by an association proxy
+        table.
+
+        """
+        super(AssociationProxyTest, self).setUp()
+
+        class Image(self.Base):
+            __tablename__ = 'image'
+            id = Column(Integer, primary_key=True)
+            products = prox('chosen_product_images', 'product',
+                            creator=lambda product:
+                                ChosenProductImage(product=product))
+
+        class ChosenProductImage(self.Base):
+            __tablename__ = 'chosen_product_image'
+            product_id = Column(Integer, ForeignKey('product.id'),
+                                primary_key=True)
+            image_id = Column(Integer, ForeignKey('image.id'),
+                              primary_key=True)
+            image = rel('Image', backref=backref(name='chosen_product_images',
+                                                 cascade="all, delete-orphan"),
+                        enable_typechecks=False)
+
+        class Product(self.Base):
+            __tablename__ = 'product'
+            id = Column(Integer, primary_key=True)
+            chosen_product_images = rel(ChosenProductImage,
+                                        backref=backref(name='product'),
+                                        cascade="all, delete-orphan")
+            chosen_images = prox('chosen_product_images', 'image',
+                                 creator=lambda image:
+                                     ChosenProductImage(image=image))
+
+        self.Product = Product
+        self.Image = Image
+        self.ChosenProductImage = ChosenProductImage
+
+        # create all the tables required for the models
+        self.Base.metadata.create_all()
+
+        # create the API endpoints
+        self.manager.create_api(self.Product, methods=['GET', 'PATCH', 'POST'],
+                                url_prefix='/api')
+        self.manager.create_api(self.Image, methods=['GET', 'PATCH', 'POST'],
+                                url_prefix='/api')
+
+    def tearDown(self):
+        """Drops all tables from the temporary database."""
+        self.Base.metadata.drop_all()
+
+    def _check_relations(self):
+        """Makes :http:method:`get` requests for the product with ID 1 and the
+        image with ID 1, ensuring that each has a relationship with the other
+        via the association proxy table.
+
+        """
+        response = self.app.get('/api/product/1')
+        data = loads(response.data)
+        self.assertIn('chosen_images', data)
+        self.assertIn({'id': 1}, data['chosen_images'])
+
+        response = self.app.get('/api/image/1')
+        data = loads(response.data)
+        self.assertIn('products', data)
+        self.assertIn({'id': 1}, data['products'])
+
+    def _check_relations_two(self):
+        """Makes :http:method:`get` requests for the product with ID 1 and the
+        images with ID 1 and 2, ensuring that the product has a relationship
+        with each image, and each image has a relationship with the product.
+
+        """
+        response = self.app.get('/api/product/1')
+        data = loads(response.data)
+        self.assertIn('chosen_images', data)
+        self.assertEquals(data['chosen_images'], [{'id': 1}, {'id': 2}])
+        self.assertEquals(data['chosen_product_images'],
+                          [{'image_id': 1, 'product_id': 1},
+                           {'image_id': 2, 'product_id': 1}])
+
+        response = self.app.get('/api/image/1')
+        data = loads(response.data)
+        self.assertIn('products', data)
+        self.assertIn({'id': 1}, data['products'])
+
+        response = self.app.get('/api/image/2')
+        data = loads(response.data)
+        self.assertIn('products', data)
+        self.assertIn({'id': 1}, data['products'])
+
+    def test_association_proxy_get_data(self):
+        """Tests that a :http:method:`get` request exhibits the correct
+        associations.
+
+        """
+        self.session.add(self.Product())
+        self.session.add(self.Image())
+        self.session.add(self.ChosenProductImage(image_id=1, product_id=1))
+        self.session.commit()
+
+        self._check_relations()
+
+    def test_association_proxy_post(self):
+        """Tests that a :http:method:`post` request correctly adds an
+        association.
+
+        """
+        self.session.add(self.Product())
+        self.session.commit()
+
+        data = {'products': [{'id': 1}]}
+        response = self.app.post('/api/image', data=dumps(data))
+        self.assertEqual(response.status_code, 201)
+
+        self._check_relations()
+
+    def test_association_proxy_patch(self):
+        """Tests that a :http:method:`patch` request correctly sets the
+        appropriate associations.
+
+        """
+        self.session.add(self.Product())
+        self.session.add(self.Image())
+        self.session.commit()
+
+        data = {'chosen_images': [{'id': 1}]}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        self._check_relations()
+
+    def test_association_proxy_patch_multiple(self):
+        """Tests that a :http:method:`patch` request correctly adds multiple
+        associations.
+
+        """
+        self.session.add(self.Product())
+        self.session.add(self.Image())
+        self.session.add(self.Image())
+        self.session.commit()
+
+        data = {'chosen_images': [{'id': 1}, {'id': 2}]}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        self._check_relations_two()
+
+    def test_association_proxy_patch_with_add(self):
+        """Tests that a :http:method:`patch` request correctly adds an
+        association.
+
+        """
+        self.session.add(self.Product())
+        self.session.add(self.Image())
+        self.session.commit()
+
+        data = {'chosen_images': {'add': {'id': 1}}}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        self._check_relations()
+
+    def test_association_proxy_patch_with_remove(self):
+        """Tests that a :http:method:`patch` request correctly removes an
+        association.
+
+        """
+        self.session.add(self.Product())
+        self.session.add(self.Image())
+        self.session.add(self.Image())
+        self.session.commit()
+
+        data = {'chosen_images': {'add': {'id': 1}}}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        data = {'chosen_images': {'add': {'id': 2}}}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        data = {'chosen_images': {'remove': [{'id': 2}]}}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        self._check_relations()
+
+    def test_association_proxy_any(self):
+        """Tests that a search query correctly searches fields on an associated
+        model.
+
+        """
+        self.session.add(self.Product())
+        self.session.add(self.Image())
+        self.session.add(self.Image())
+        self.session.commit()
+
+        data = {'chosen_images': [{'id': 1}, {'id': 2}]}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        filters = {'filters':
+                       [{'name': 'chosen_images__id', 'op': 'any', 'val': 1}]}
+        response = self.app.get('/api/product?q=' + dumps(filters))
+        self.assertEqual(response.status_code, 200)
+        data = loads(response.data)
+        self.assertIn({'id': 1}, data['objects'][0]['chosen_images'])
+
+        data = {'chosen_images': {'remove': [{'id': 1}]}}
+        response = self.app.patch('/api/product/1', data=dumps(data))
+        self.assertEqual(response.status_code, 200)
+
+        filters = {'filters':
+                       [{'name': 'chosen_images__id', 'op': 'any', 'val': 1}]}
+        response = self.app.get('/api/product?q=' + dumps(filters))
+        self.assertEqual(response.status_code, 200)
+        data = loads(response.data)
+        self.assertEqual(data['num_results'], 0)
+
+
 def load_tests(loader, standard_tests, pattern):
     """Returns the test suite for this module."""
     suite = TestSuite()
@@ -1283,4 +1520,5 @@ def load_tests(loader, standard_tests, pattern):
     suite.addTest(loader.loadTestsFromTestCase(FunctionAPITestCase))
     suite.addTest(loader.loadTestsFromTestCase(FunctionEvaluationTest))
     suite.addTest(loader.loadTestsFromTestCase(APITestCase))
+    suite.addTest(loader.loadTestsFromTestCase(AssociationProxyTest))
     return suite
