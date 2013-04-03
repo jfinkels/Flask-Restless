@@ -88,6 +88,7 @@ class ProcessingException(Exception):
         self.message = message
         self.status_code = status_code
 
+NO_CHANGE = object()
 
 def jsonify_status_code(status_code, *args, **kw):
     """Returns a jsonified response with the specified HTTP status code.
