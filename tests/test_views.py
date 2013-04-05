@@ -474,6 +474,9 @@ class APITestCase(TestSupport):
         response = self.app.post('/api/person', data=dumps(dict(bogus=0)))
         self.assertEqual(400, response.status_code)
 
+        response = self.app.post('/api/person', data=dumps(dict(is_minor=True)))
+        self.assertEqual(400, response.status_code)
+
     def test_post_nullable_date(self):
         """Tests the creation of a model with a nullable date field."""
         self.manager.create_api(self.Star, methods=['GET', 'POST'])
@@ -957,7 +960,7 @@ class APITestCase(TestSupport):
         # Looking for something that does not exist on the database
         search['filters'][0]['val'] = 'Sammy'
         resp = self.app.search('/api/person', dumps(search))
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 400)
         self.assertEqual(loads(resp.data)['message'], 'No result found')
 
         # We have to receive an error if the user provides an invalid
@@ -1061,7 +1064,7 @@ class APITestCase(TestSupport):
 
         # Testing multiple results when calling .one()
         resp = self.app.search('/api/person', dumps({'single': True}))
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 400)
         self.assertEqual(loads(resp.data)['message'], 'Multiple results found')
 
     def test_search_bad_arguments(self):

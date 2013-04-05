@@ -50,6 +50,7 @@ from sqlalchemy.orm.query import Query
 from sqlalchemy.sql import func
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.associationproxy import AssociationProxy
+from sqlalchemy.sql.expression import _BinaryExpression
 
 from .helpers import get_columns
 from .helpers import get_related_model
@@ -59,6 +60,13 @@ from .helpers import unicode_keys_to_strings
 from .helpers import upper_keys
 from .search import create_query
 from .search import search
+
+
+#: A sentinel object which preprocessors or postprocessors may return if they
+#: make no change to the input parameters.
+#:
+#: For more information, see :ref:`processors`.
+NO_CHANGE = object()
 
 
 class ProcessingException(Exception):
@@ -110,6 +118,15 @@ def jsonpify(*args, **kw):
         mimetype = 'application/javascript'
         return current_app.response_class(content, mimetype=mimetype)
     return response
+
+
+def _has_field(model, fieldname):
+    """Returns ``True`` if the `model` has the specified field, and it is not
+    a hybrid property.
+
+    """
+    return (hasattr(model, fieldname) and
+            not isinstance(getattr(model, fieldname), _BinaryExpression))
 
 
 def _is_date_field(model, fieldname):
@@ -176,6 +193,20 @@ def _primary_key_name(model_or_instance):
     return 'id' if 'id' in primary_key_names else primary_key_names[0]
 
 
+def _is_like_list(instance, relation):
+    """Returns ``True`` if and only if the relation of `instance` whose name is
+    `relation` is list-like.
+
+    A relation may be like a list if, for example, it is a non-lazy one-to-many
+    relation, or it is a dynamically loaded one-to-many.
+
+    """
+    if relation in instance._sa_class_manager:
+        return instance._sa_class_manager[relation].property.uselist
+    related_value = getattr(type(instance), relation, None)
+    return isinstance(related_value, AssociationProxy)
+
+
 # This code was adapted from :meth:`elixir.entity.Entity.to_dict` and
 # http://stackoverflow.com/q/1958219/108197.
 def _to_dict(instance, deep=None):
@@ -192,12 +223,10 @@ def _to_dict(instance, deep=None):
     """
     # create a list of names of columns, including hybrid properties
     columns = [p.key for p in object_mapper(instance).iterate_properties
-            if isinstance(p, ColumnProperty)]
+               if isinstance(p, ColumnProperty)]
     for parent in type(instance).mro():
-        columns.extend(
-            [key for key,value in parent.__dict__.iteritems()
-            if isinstance(value, hybrid_property)]
-        )
+        columns += [key for key,value in parent.__dict__.iteritems()
+                    if isinstance(value, hybrid_property)]
     # create a dictionary mapping column name to value
     result = dict((col, getattr(instance, col)) for col in columns)
     # Convert datetime and date objects to ISO 8601 format.
@@ -216,15 +245,7 @@ def _to_dict(instance, deep=None):
         if relatedvalue is None:
             result[relation] = None
             continue
-        # Do some black magic on SQLAlchemy to decide if the related instance
-        # should be rendered as a list or as a single object.
-        if relation in instance._sa_class_manager:
-            uselist = instance._sa_class_manager[relation].property.uselist
-        elif isinstance(getattr(type(instance), relation, None), AssociationProxy):
-            uselist = True
-        else:
-            uselist = False
-        if uselist:
+        if _is_like_list(instance, relation):
             result[relation] = [_to_dict(inst, rdeep) for inst in relatedvalue]
             continue
         # If the related value is dynamically loaded, resolve the query to get
@@ -817,15 +838,17 @@ class API(ModelView):
 
         # exceptions are caught by the get() method, which calls this one
         for preprocessor in self.preprocessors['GET_MANY']:
-            data = preprocessor(data)
+            new_data = preprocessor(data)
+            if new_data is not NO_CHANGE:
+                data = new_data
 
         # perform a filtered search
         try:
             result = search(self.session, self.model, data)
         except NoResultFound:
-            return jsonify(message='No result found')
+            return jsonify_status_code(400, message='No result found')
         except MultipleResultsFound:
-            return jsonify(message='Multiple results found')
+            return jsonify_status_code(400, message='Multiple results found')
         except:
             return jsonify_status_code(400,
                                        message='Unable to construct query')
@@ -841,7 +864,9 @@ class API(ModelView):
             result = _to_dict(result, deep)
 
         for postprocessor in self.postprocessors['GET_MANY']:
-            result = postprocessor(result)
+            new_result = postprocessor(result)
+            if new_result is not NO_CHANGE:
+                result = new_result
 
         return jsonpify(result)
 
@@ -942,7 +967,7 @@ class API(ModelView):
             abort(404)
         return self._inst_to_dict(inst)
 
-    def get(self, instid):
+    def get(self, instid, relationname):
         """Returns a JSON representation of an instance of model with the
         specified name.
 
@@ -961,21 +986,46 @@ class API(ModelView):
                 return self._search()
             for preprocessor in self.preprocessors['GET_SINGLE']:
                 preprocessor(instid)
-            result = self._instid_to_dict(instid)
+            # get the instance of the "main" model whose ID is instid
+            instance = self._get_by(instid)
+            if instance is None:
+                abort(404)
+            # If no relation is requested, just return the instance. Otherwise,
+            # get the value of the relation specified by `relationname`.
+            if relationname is None:
+                result = self._inst_to_dict(instance)
+            else:
+                related_value = getattr(instance, relationname)
+                # create a placeholder for the relations of the returned models
+                related_model = get_related_model(self.model, relationname)
+                relations = frozenset(get_relations(related_model))
+                deep = dict((r, {}) for r in relations)
+                # for security purposes, don't transmit list as top-level JSON
+                if _is_like_list(instance, relationname):
+                    result = self._paginated(list(related_value), deep)
+                else:
+                    result = _to_dict(related_value, deep)
             for postprocessor in self.postprocessors['GET_SINGLE']:
-                result = postprocessor(result)
+                new_result = postprocessor(result)
+                if new_result is not NO_CHANGE:
+                    result = new_result
             return jsonpify(result)
         except ProcessingException, e:
             return jsonify_status_code(status_code=e.status_code,
                                        message=e.message)
 
-    def delete(self, instid):
+    def delete(self, instid, relationname):
         """Removes the specified instance of the model with the specified name
         from the database.
 
         Since :http:method:`delete` is an idempotent method according to the
         :rfc:`2616`, this method responds with :http:status:`204` regardless of
         whether an object was deleted.
+
+        This function ignores the `relationname` keyword argument.
+
+        .. versionadded:: 0.10
+           Added the `relationname` keyword argument.
 
         """
         is_deleted = False
@@ -1029,7 +1079,9 @@ class API(ModelView):
         # apply any preprocessors to the POST arguments
         try:
             for preprocessor in self.preprocessors['POST']:
-                params = preprocessor(params)
+                new_params = preprocessor(params)
+                if new_params is not NO_CHANGE:
+                    params = new_params
         except ProcessingException, e:
             return jsonify_status_code(status_code=e.status_code,
                                        message=e.message)
@@ -1037,7 +1089,7 @@ class API(ModelView):
         # Check for any request parameter naming a column which does not exist
         # on the current model.
         for field in params:
-            if not hasattr(self.model, field):
+            if not _has_field(self.model, field):
                 msg = "Model does not have field '%s'" % field
                 return jsonify_status_code(400, message=msg)
 
@@ -1084,7 +1136,9 @@ class API(ModelView):
 
             try:
                 for postprocessor in self.postprocessors['POST']:
-                    result = postprocessor(result)
+                    new_result = postprocessor(result)
+                    if new_result is not NO_CHANGE:
+                        result = new_result
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
@@ -1094,7 +1148,7 @@ class API(ModelView):
         except IntegrityError, error:
             return jsonify_status_code(400, message=error.message)
 
-    def patch(self, instid):
+    def patch(self, instid, relationname):
         """Updates the instance specified by ``instid`` of the named model, or
         updates multiple instances if ``instid`` is ``None``.
 
@@ -1108,6 +1162,11 @@ class API(ModelView):
         See the :func:`_search` documentation on more information about search
         parameters for restricting the set of instances on which updates will
         be made in this case.
+
+        This function ignores the `relationname` keyword argument.
+
+        .. versionadded:: 0.10
+           Added the `relationname` keyword argument.
 
         """
         # try to load the fields/values to update from the body of the request
@@ -1125,14 +1184,18 @@ class API(ModelView):
                 # dictionary indicate a change in the model's field.
                 search_params = data.pop('q', {})
                 for preprocessor in self.preprocessors['PATCH_MANY']:
-                    search_params, data = preprocessor(search_params, data)
+                    result = preprocessor(search_params, data)
+                    if result is not NO_CHANGE:
+                        search_params, data = result
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
         else:
             try:
                 for preprocessor in self.preprocessors['PATCH_SINGLE']:
-                    data = preprocessor(instid, data)
+                    new_data = preprocessor(instid, data)
+                    if new_data is not NO_CHANGE:
+                        data = new_data
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
@@ -1140,7 +1203,7 @@ class API(ModelView):
         # Check for any request parameter naming a column which does not exist
         # on the current model.
         for field in data:
-            if not hasattr(self.model, field):
+            if not _has_field(self.model, field):
                 msg = "Model does not have field '%s'" % field
                 return jsonify_status_code(400, message=msg)
 
@@ -1185,7 +1248,9 @@ class API(ModelView):
             result = dict(num_modified=num_modified)
             try:
                 for postprocessor in self.postprocessors['PATCH_MANY']:
-                    result = postprocessor(query, result)
+                    new_result = postprocessor(query, result)
+                    if new_result is not NO_CHANGE:
+                        result = new_result
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
@@ -1193,13 +1258,15 @@ class API(ModelView):
             result = self._instid_to_dict(instid)
             try:
                 for postprocessor in self.postprocessors['PATCH_SINGLE']:
-                    result = postprocessor(result)
+                    new_result = postprocessor(result)
+                    if new_result is not NO_CHANGE:
+                        result = new_result
             except ProcessingException, e:
                 return jsonify_status_code(status_code=e.status_code,
                                            message=e.message)
 
         return jsonify(result)
 
-    def put(self, instid):
+    def put(self, instid, relationname):
         """Alias for :meth:`patch`."""
-        return self.patch(instid)
+        return self.patch(instid, relationname)

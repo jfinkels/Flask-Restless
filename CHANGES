@@ -30,6 +30,12 @@ Not yet released.
 - #157: :http:method:`post` requests now receive a response containing all
    fields of the created instance.
 - #148: adds support for SQLAlchemy `association proxies <http://docs.sqlalchemy.org/en/latest/orm/extensions/associationproxy.html>`_.
+- #165: fixed bug in automatic exposing of URLs for related instances.
+- #162: allow pre- and postprocessors to indicate that no change has occurred.
+- #170: respond with correct HTTP status codes when a query for a single
+   instance results in none or multiple instances.
+- #174: allow dynamically loaded relationships for automatically exposed URLs
+   of related instances.
 
 Version 0.9.3
 -------------
