@@ -9,7 +9,10 @@
 
 """
 import datetime
-from unittest2 import TestCase
+try:
+    from unittest2 import TestCase
+except ImportError:
+    from unittest import TestCase
 
 from flask import Flask
 from sqlalchemy import Column

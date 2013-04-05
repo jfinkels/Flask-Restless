@@ -25,8 +25,10 @@
     :license: GNU AGPLv3+ or BSD
 
 """
-from unittest2 import TestSuite
-from unittest2 import defaultTestLoader
+try:
+    from unittest2 import TestSuite, defaultTestLoader
+except ImportError:
+    from unittest import TestSuite, defaultTestLoader
 
 from . import test_helpers
 from . import test_manager

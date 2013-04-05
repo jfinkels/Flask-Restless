@@ -31,6 +31,10 @@ if sys.version_info < (2, 6):
 else:
     requirements.append('python-dateutil!=2.0')
 
+test_requirements = []
+if sys.version_info < (2, 7):
+    test_requirements.append('unittest2')
+
 
 class run_coverage(Command):
     """Runs ``coverage``, the Python code coverage tool to generate a test
@@ -102,7 +106,7 @@ setup(
     platforms='any',
     packages=['flask_restless'],
     test_suite='tests.suite',
-    tests_require=['unittest2'],
+    tests_require=test_requirements,
     url='http://github.com/jfinkels/flask-restless',
     version='0.10.0-dev',
     zip_safe=False

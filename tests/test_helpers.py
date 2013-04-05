@@ -8,8 +8,10 @@
     :license: GNU AGPLv3+ or BSD
 
 """
-from unittest2 import TestCase
-from unittest2 import TestSuite
+try:
+    from unittest2 import TestCase, TestSuite
+except ImportError:
+    from unittest import TestCase, TestSuite
 
 from flask.ext.restless.helpers import get_columns
 from flask.ext.restless.helpers import get_relations

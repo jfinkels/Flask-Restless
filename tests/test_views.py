@@ -13,8 +13,10 @@ from __future__ import with_statement
 
 from datetime import date
 from datetime import datetime
-from unittest2 import TestSuite
-from unittest2 import skipUnless
+try:
+    from unittest2 import TestSuite, skipUnless
+except ImportError:
+    from unittest import TestSuite, skipUnless
 
 from flask import json
 try:

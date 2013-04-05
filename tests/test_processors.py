@@ -12,7 +12,10 @@
 from __future__ import with_statement
 
 from datetime import date
-from unittest2 import TestSuite
+try:
+    from unittest2 import TestSuite
+except ImportError:
+    from unittest import TestSuite
 
 from flask import json
 from flask.ext.restless.views import ProcessingException, NO_CHANGE
