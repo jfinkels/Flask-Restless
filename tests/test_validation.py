@@ -104,17 +104,17 @@ class SimpleValidationTest(TestSupport):
         # test posting a person with a badly formatted email field
         person = dict(name='Jeffrey', email='bogus!!!email', age=1)
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 400)
+        assert response.status_code == 400
         data = loads(response.data)
-        self.assertIn('validation_errors', data)
+        assert 'validation_errors' in data
         errors = data['validation_errors']
-        self.assertIn('email', errors)
-        self.assertIn('format', errors['email'].lower())
+        assert 'email' in errors
+        assert 'format' in errors['email'].lower()
 
         # posting a new person with valid email format should be fine
         person = dict(name='John', email='foo@example.com', age=1)
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 201)
+        assert response.status_code == 201
         personid = loads(response.data)['id']
 
         # test patching a person to with badly formatted data
@@ -122,10 +122,10 @@ class SimpleValidationTest(TestSupport):
         response = self.app.patch('/api/test/' + str(personid),
                                   data=dumps(person))
         data = loads(response.data)
-        self.assertIn('validation_errors', data)
+        assert 'validation_errors' in data
         errors = data['validation_errors']
-        self.assertIn('email', errors)
-        self.assertIn('format', errors['email'].lower())
+        assert 'email' in errors
+        assert 'format' in errors['email'].lower()
 
         # patching a person with correctly formatted fields should be fine
         person = dict(email='foo@example.com')
@@ -134,7 +134,7 @@ class SimpleValidationTest(TestSupport):
         data = loads(response.data)
         if 'validation_errors' in data and \
                 'email' in data['validation_errors']:
-            self.assertNotIn('format', errors['email'].lower())
+            assert 'format' not in errors['email'].lower()
 
 
 class SAVTest(TestSupport):
@@ -173,27 +173,27 @@ class SAVTest(TestSupport):
         # test posting a person with a badly formatted email field
         person = dict(name='Jeffrey', email='bogus!!!email', age=1)
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 400)
+        assert response.status_code == 400
         data = loads(response.data)
-        self.assertIn('validation_errors', data)
+        assert 'validation_errors' in data
         errors = data['validation_errors']
-        self.assertIn('email', errors)
-        self.assertIn('email address', errors['email'].lower())
+        assert 'email' in errors
+        assert 'email address' in errors['email'].lower()
 
         # posting a new person with valid email format should be fine
         person = dict(name='John', email='foo@example.com', age=1)
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 201)
+        assert response.status_code == 201
         personid = loads(response.data)['id']
 
         # test patching a person to with badly formatted data
         person = dict(name='Jeffrey', email='bogus!!!email', age=24)
         response = self.app.patch('/api/test/' + str(personid),
                                   data=dumps(person))
-        self.assertIn('validation_errors', data)
+        assert 'validation_errors' in data
         errors = data['validation_errors']
-        self.assertIn('email', errors)
-        self.assertIn('email address', errors['email'].lower())
+        assert 'email' in errors
+        assert 'email address' in errors['email'].lower()
 
         # patching a person with correctly formatted fields should be fine
         person = dict(email='foo@example.com')
@@ -202,7 +202,7 @@ class SAVTest(TestSupport):
         data = loads(response.data)
         if 'validation_errors' in data and \
                 'email' in data['validation_errors']:
-            self.assertNotIn('email address', errors['email'].lower())
+            assert 'email address' not in errors['email'].lower()
 
     def test_presence_validations(self):
         """Tests that errors from validators which check for presence are
@@ -212,35 +212,35 @@ class SAVTest(TestSupport):
         # missing required name field
         person = dict(email='example@example.com')
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 400)
+        assert response.status_code == 400
         data = loads(response.data)
-        self.assertIn('validation_errors', data)
+        assert 'validation_errors' in data
         errors = data['validation_errors']
-        self.assertIn('name', errors)
-        self.assertIn('enter a value', errors['name'].lower())
+        assert 'name' in errors
+        assert 'enter a value' in errors['name'].lower()
 
         # missing required email field
         person = dict(name='Jeffrey')
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 400)
+        assert response.status_code == 400
         data = loads(response.data)
-        self.assertIn('validation_errors', data)
+        assert 'validation_errors' in data
         errors = data['validation_errors']
-        self.assertIn('email', errors)
-        self.assertIn('enter a value', errors['email'].lower())
+        assert 'email' in errors
+        assert 'enter a value' in errors['email'].lower()
 
         # everything required is now provided
         person = dict(name='Jeffrey', email='example@example.com', age=24)
         response = self.app.post('/api/test', data=dumps(person))
-        self.assertEqual(response.status_code, 201)
+        assert response.status_code == 201
         personid = loads(response.data)['id']
 
         # check that the provided field values are in there
         response = self.app.get('/api/test/' + str(personid))
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         data = loads(response.data)
-        self.assertEqual(data['name'], 'Jeffrey')
-        self.assertEqual(data['email'], 'example@example.com')
+        assert data['name'] == 'Jeffrey'
+        assert data['email'] == 'example@example.com'
 
 
 # skipUnless should be used as a decorator, but Python 2.5 doesn't have
