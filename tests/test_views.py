@@ -1194,18 +1194,6 @@ class SearchTest(TestSupportPrefilled):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(loads(resp.data)['message'], 'Multiple results found')
 
-    def test_search_disjunction(self):
-        """Tests for search with disjunctive filters."""
-        data = dict(filters=[dict(name='age', op='le', val=10),
-                             dict(name='age', op='ge', val=25)],
-                    disjunction=True)
-        response = self.app.search('/api/person', dumps(data))
-        self.assertEqual(200, response.status_code)
-        data = loads(response.data)['objects']
-        self.assertEqual(3, len(data))
-        self.assertEqual(set(['Lucy', 'Katy', 'John']),
-                         set([person['name'] for person in data]))
-
     def test_search_bad_arguments(self):
         """Tests that search requests with bad parameters respond with an error
         message.
