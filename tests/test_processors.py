@@ -15,10 +15,10 @@ from datetime import date
 from unittest2 import TestSuite
 
 from flask import json
-from flask.ext.restless.views import ProcessingException, NO_CHANGE
+from flask.ext.restless.views import ProcessingException
 from .helpers import TestSupport
 
-__all__ = ['ProcessorsTestCase']
+__all__ = ['ProcessorsTest']
 
 dumps = json.dumps
 loads = json.loads
@@ -44,7 +44,7 @@ class ProcessorsTest(TestSupport):
 
         """
 
-        def check_permissions(instid):
+        def check_permissions(**kw):
             raise ProcessingException(status_code=403,
                                       message='Permission denied')
 
@@ -57,13 +57,12 @@ class ProcessorsTest(TestSupport):
         self.assertEqual(response.status_code, 403)
 
     def test_get_many_preprocessor(self):
-        def check_permissions(params):
+        def check_permissions(search_params=None, **kw):
             filt = {u'name': u'id', u'op': u'in', u'val': [1, 3]}
-            if 'filters' not in params:
-                params['filters'] = [filt]
+            if 'filters' not in search_params:
+                search_params['filters'] = [filt]
             else:
-                params['filters'].append(filt)
-            return params
+                search_params['filters'].append(filt)
 
         pre = dict(GET_MANY=[check_permissions])
         self.manager.create_api(self.Person, methods=['GET', 'POST'],
@@ -91,13 +90,11 @@ class ProcessorsTest(TestSupport):
 
     def test_post_preprocessor(self):
         """Tests :http:method:`post` requests with a preprocessor function."""
-        def add_parameter(params):
-            if params:
-                # just add a new attribute
-                params['other'] = 7
-            return params
+        def add_parameter(data=None, **kw):
+            if data:
+                data['other'] = 7
 
-        def check_permissions(params):
+        def check_permissions(data=None, **kw):
             raise ProcessingException(status_code=403,
                                       message='Permission denied')
 
@@ -124,7 +121,7 @@ class ProcessorsTest(TestSupport):
         """Tests for using a preprocessor with :http:method:`delete` requests.
 
         """
-        def check_permissions(instid):
+        def check_permissions(**kw):
             raise ProcessingException(status_code=403,
                                       message='Permission denied')
 
@@ -155,7 +152,7 @@ class ProcessorsTest(TestSupport):
 
         """
 
-        def check_permissions(instid, data):
+        def check_permissions(**kw):
             raise ProcessingException(status_code=403,
                                       message='Permission denied')
 
@@ -177,15 +174,13 @@ class ProcessorsTest(TestSupport):
         response = self.app.patch('/api/person/1', data=dumps({'age': 27}))
         self.assertEqual(response.status_code, 403)
 
-
     def test_patch_single_preprocessor2(self):
         """Tests for using a preprocessor with :http:method:`patch` requests.
 
         """
 
-        def update_data(instid, data):
+        def update_data(data=None, **kw):
             data['other'] = 27
-            return data
 
         pre = dict(PATCH_SINGLE=[update_data])
         # recreate the api at /api/v1/person
@@ -216,9 +211,8 @@ class ProcessorsTest(TestSupport):
 
         """
 
-        def update_data(params, data):
+        def update_data(data=None, **kw):
             data['other'] = 27
-            return params, data
 
         pre = dict(PATCH_MANY=[update_data])
         # recreate the api at /api/v1/person
@@ -233,7 +227,6 @@ class ProcessorsTest(TestSupport):
                       data=dumps({'name': u'Lucy', 'age': 23}))
         self.app.post('/api/person',
                       data=dumps({'name': u'Mary', 'age': 25}))
-
 
         # Changing the birth date field of the entire collection
         day, month, year = 15, 9, 1986
@@ -252,8 +245,8 @@ class ProcessorsTest(TestSupport):
     def test_processor_no_change(self):
         """Tests :http:method:`post` requests with a preprocessor function.
         that makes no change to the data"""
-        def no_change(*args):
-            return NO_CHANGE
+        def no_change(**kw):
+            pass
 
         self.manager.create_api(self.Person, methods=['GET', 'POST'],
                                 url_prefix='/api/v2',
@@ -285,6 +278,39 @@ class ProcessorsTest(TestSupport):
         person_response = loads(response.data)["objects"][0]
         self.assertEquals(person_response['name'], person.name)
         self.assertEquals(person_response['age'], person.age)
+
+    def test_add_filters(self):
+        """Test for adding a filter to a :http:method:`get` request for a
+        collection where there was no query parameter before.
+
+        """
+        # Create some people in the database.
+        person1 = self.Person(name='foo')
+        person2 = self.Person(name='bar')
+        person3 = self.Person(name='baz')
+        self.session.add_all((person1, person2, person3))
+        self.session.commit()
+
+        # Create a preprocessor function that adds a filter.
+        def add_filter(search_params=None, **kw):
+            if search_params is None:
+                return
+            filt = dict(name='name', op='like', val='ba%')
+            if 'filters' not in search_params:
+                search_params['filters'] = []
+            search_params['filters'].append(filt)
+
+        # Create the API with the preprocessor.
+        self.manager.create_api(self.Person,
+                                preprocessors=dict(GET_MANY=[add_filter]))
+
+        # Test that the filter is added on GET requests to the collection.
+        response = self.app.get('/api/person')
+        self.assertEqual(200, response.status_code)
+        data = loads(response.data)['objects']
+        self.assertEqual(2, len(data))
+        self.assertEqual(sorted(['bar', 'baz']),
+                         sorted([person['name'] for person in data]))
 
 
 def load_tests(loader, standard_tests, pattern):

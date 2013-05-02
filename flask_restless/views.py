@@ -24,49 +24,38 @@
 from __future__ import division
 
 from collections import defaultdict
-import itertools
-import datetime
+from functools import wraps
 import math
 import warnings
 
-from dateutil.parser import parse as parse_datetime
-from flask import abort
 from flask import current_app
 from flask import json
 from flask import jsonify
 from flask import request
 from flask.views import MethodView
-from sqlalchemy import Date
-from sqlalchemy import DateTime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import class_mapper
-from sqlalchemy.orm import ColumnProperty
-from sqlalchemy.orm import object_mapper
-from sqlalchemy.orm import RelationshipProperty
 from sqlalchemy.orm.exc import MultipleResultsFound
 from sqlalchemy.orm.exc import NoResultFound
-from sqlalchemy.orm.query import Query
-from sqlalchemy.sql import func
-from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.ext.associationproxy import AssociationProxy
-from sqlalchemy.sql.expression import _BinaryExpression
 
+from .exceptions import json_abort
+from .helpers import evaluate_functions
+from .helpers import get_by
 from .helpers import get_columns
+from .helpers import get_or_create
 from .helpers import get_related_model
 from .helpers import get_relations
+from .helpers import has_field
+from .helpers import is_like_list
+from .helpers import partition
+from .helpers import query_by_primary_key
 from .helpers import session_query
+from .helpers import strings_to_dates
+from .helpers import to_dict
 from .helpers import unicode_keys_to_strings
 from .helpers import upper_keys
 from .search import create_query
 from .search import search
-
-
-#: A sentinel object which preprocessors or postprocessors may return if they
-#: make no change to the input parameters.
-#:
-#: For more information, see :ref:`processors`.
-NO_CHANGE = object()
 
 
 class ProcessingException(Exception):
@@ -88,6 +77,22 @@ class ProcessingException(Exception):
         super(ProcessingException, self).__init__(*args, **kwargs)
         self.message = message
         self.status_code = status_code
+
+
+def catch_processing_exceptions(func):
+    """Decorator that catches :exc:`ProcessingException`s and subsequently
+    returns a JSON-ified error response.
+
+    """
+    @wraps(func)
+    def decorator(*args, **kw):
+        try:
+            return func(*args, **kw)
+        except ProcessingException, exception:
+            current_app.logger.exception(exception.message)
+            status, message = exception.status_code, exception.message
+            return jsonify_status_code(status_code=status, message=message)
+    return decorator
 
 
 def jsonify_status_code(status_code, *args, **kw):
@@ -120,216 +125,66 @@ def jsonpify(*args, **kw):
     return response
 
 
-def _has_field(model, fieldname):
-    """Returns ``True`` if the `model` has the specified field, and it is not
-    a hybrid property.
+def _parse_includes(column_names):
+    """Returns a pair, consisting of a list of column names to include on the
+    left and a dictionary mapping relation name to a list containing the names
+    of fields on the related model which should be included.
+
+    `column_names` is either ``None`` or a list of strings. If it is ``None``,
+    the returned pair will be ``(None, None)``.
+
+    If the name of a relation appears as a key in the dictionary, then it will
+    not appear in the list.
 
     """
-    return (hasattr(model, fieldname) and
-            not isinstance(getattr(model, fieldname), _BinaryExpression))
+    if column_names is None:
+        return None, None
+    dotted_names, columns = partition(column_names, lambda name: '.' in name)
+    # Create a dictionary mapping relation names to fields on the related
+    # model.
+    relations = defaultdict(list)
+    for name in dotted_names:
+        relation, field = name.split('.', 1)
+        # Only add the relation if it's column has been specified.
+        if relation in columns:
+            relations[relation].append(field)
+    # Included relations need only be in the relations dictionary, not the
+    # columns list.
+    for relation in relations:
+        if relation in columns:
+            columns.remove(relation)
+    return columns, relations
 
 
-def _is_date_field(model, fieldname):
-    """Returns ``True`` if and only if the field of `model` with the specified
-    name corresponds to either a :class:`datetime.date` object or a
-    :class:`datetime.datetime` object.
+def _parse_excludes(column_names):
+    """Returns a pair, consisting of a list of column names to exclude on the
+    left and a dictionary mapping relation name to a list containing the names
+    of fields on the related model which should be excluded.
 
-    """
-    field = getattr(model, fieldname)
-    if isinstance(field, AssociationProxy):
-        field = field.remote_attr
-    prop = field.property
-    if isinstance(prop, RelationshipProperty):
-        return False
-    fieldtype = prop.columns[0].type
-    return isinstance(fieldtype, Date) or isinstance(fieldtype, DateTime)
+    `column_names` is either ``None`` or a list of strings. If it is ``None``,
+    the returned pair will be ``(None, None)``.
 
-
-def _get_or_create(session, model, **kwargs):
-    """Returns the first instance of the specified model filtered by the
-    keyword arguments, or creates a new instance of the model and returns that.
-
-    This function returns a two-tuple in which the first element is the created
-    or retrieved instance and the second is a boolean value which is ``True``
-    if and only if an instance was created.
-
-    The idea for this function is based on Django's ``Model.get_or_create()``
-    method.
-
-    `session` is the session in which all database transactions are made (this
-    should be :attr:`flask.ext.sqlalchemy.SQLAlchemy.session`).
-
-    `model` is the SQLAlchemy model to get or create (this should be a subclass
-    of :class:`~flask.ext.restless.model.Entity`).
-
-    `kwargs` are the keyword arguments which will be passed to the
-    :func:`sqlalchemy.orm.query.Query.filter_by` function.
+    If the name of a relation appears in the list then it will not appear in
+    the dictionary.
 
     """
-    query = session_query(session, model)
-    instance = query.filter_by(**kwargs).first()
-    if instance:
-        return instance, False
-    instance = model(**kwargs)
-    session.add(instance)
-    session.flush()
-    return instance, True
-
-
-def _primary_key_name(model_or_instance):
-    """Returns the name of the primary key of the specified model or instance
-    of a model, as a string.
-
-    If `model_or_instance` specifies multiple primary keys and ``'id'`` is one
-    of them, ``'id'`` is returned. If `model_or_instance` specifies multiple
-    primary keys and ``'id'`` is not one of them, only the name of the first
-    one in the list of primary keys is returned.
-
-    """
-    its_a_model = isinstance(model_or_instance, type)
-    mapper = class_mapper if its_a_model else object_mapper
-    mapped = mapper(model_or_instance)
-    primary_key_names = [key.name for key in mapped.primary_key]
-    return 'id' if 'id' in primary_key_names else primary_key_names[0]
-
-
-def _is_like_list(instance, relation):
-    """Returns ``True`` if and only if the relation of `instance` whose name is
-    `relation` is list-like.
-
-    A relation may be like a list if, for example, it is a non-lazy one-to-many
-    relation, or it is a dynamically loaded one-to-many.
-
-    """
-    if relation in instance._sa_class_manager:
-        return instance._sa_class_manager[relation].property.uselist
-    related_value = getattr(type(instance), relation, None)
-    return isinstance(related_value, AssociationProxy)
-
-
-# This code was adapted from :meth:`elixir.entity.Entity.to_dict` and
-# http://stackoverflow.com/q/1958219/108197.
-def _to_dict(instance, deep=None):
-    """Returns a dictionary representing the fields of the specified `instance`
-    of a SQLAlchemy model.
-
-    `deep` is a dictionary containing a mapping from a relation name (for a
-    relation of `instance`) to either a list or a dictionary. This is a
-    recursive structure which represents the `deep` argument when calling
-    :func:`!_to_dict` on related instances. When an empty list is encountered,
-    :func:`!_to_dict` returns a list of the string representations of the
-    related instances.
-
-    """
-    # create a list of names of columns, including hybrid properties
-    columns = [p.key for p in object_mapper(instance).iterate_properties
-               if isinstance(p, ColumnProperty)]
-    for parent in type(instance).mro():
-        columns += [key for key,value in parent.__dict__.iteritems()
-                    if isinstance(value, hybrid_property)]
-    # create a dictionary mapping column name to value
-    result = dict((col, getattr(instance, col)) for col in columns)
-    # Convert datetime and date objects to ISO 8601 format.
-    #
-    # TODO We can get rid of this when issue #33 is resolved.
-    for key, value in result.items():
-        if isinstance(value, datetime.date):
-            result[key] = value.isoformat()
-    # recursively call _to_dict on each of the `deep` relations
-    deep = deep or {}
-    for relation, rdeep in deep.iteritems():
-        # Get the related value so we can see if it is None, a list, a query
-        # (as specified by a dynamic relationship loader), or an actual
-        # instance of a model.
-        relatedvalue = getattr(instance, relation)
-        if relatedvalue is None:
-            result[relation] = None
-            continue
-        if _is_like_list(instance, relation):
-            result[relation] = [_to_dict(inst, rdeep) for inst in relatedvalue]
-            continue
-        # If the related value is dynamically loaded, resolve the query to get
-        # the single instance.
-        if isinstance(relatedvalue, Query):
-            relatedvalue = relatedvalue.one()
-        result[relation] = _to_dict(relatedvalue, rdeep)
-    return result
-
-
-def _evaluate_functions(session, model, functions):
-    """Executes each of the SQLAlchemy functions specified in ``functions``, a
-    list of dictionaries of the form described below, on the given model and
-    returns a dictionary mapping function name (slightly modified, see below)
-    to result of evaluation of that function.
-
-    `session` is the SQLAlchemy session in which all database transactions will
-    be performed.
-
-    `model` is the :class:`flask.ext.restless.Entity` object on which the
-    specified functions will be evaluated.
-
-    ``functions`` is a list of dictionaries of the form::
-
-        {'name': 'avg', 'field': 'amount'}
-
-    For example, if you want the sum and the average of the field named
-    "amount"::
-
-        >>> # assume instances of Person exist in the database...
-        >>> f1 = dict(name='sum', field='amount')
-        >>> f2 = dict(name='avg', field='amount')
-        >>> evaluate_functions(Person, [f1, f2])
-        {'avg__amount': 456, 'sum__amount': 123}
-
-    The return value is a dictionary mapping ``'<funcname>__<fieldname>'`` to
-    the result of evaluating that function on that field. If `model` is
-    ``None`` or `functions` is empty, this function returns the empty
-    dictionary.
-
-    If a field does not exist on a given model, :exc:`AttributeError` is
-    raised. If a function does not exist,
-    :exc:`sqlalchemy.exc.OperationalError` is raised. The former exception will
-    have a ``field`` attribute which is the name of the field which does not
-    exist. The latter exception will have a ``function`` attribute which is the
-    name of the function with does not exist.
-
-    """
-    if not model or not functions:
-        return {}
-    processed = []
-    funcnames = []
-    for function in functions:
-        funcname, fieldname = function['name'], function['field']
-        # We retrieve the function by name from the SQLAlchemy ``func``
-        # module and the field by name from the model class.
-        #
-        # If the specified field doesn't exist, this raises AttributeError.
-        funcobj = getattr(func, funcname)
-        try:
-            field = getattr(model, fieldname)
-        except AttributeError, exception:
-            exception.field = fieldname
-            raise exception
-        # Time to store things to be executed. The processed list stores
-        # functions that will be executed in the database and funcnames
-        # contains names of the entries that will be returned to the
-        # caller.
-        funcnames.append('%s__%s' % (funcname, fieldname))
-        processed.append(funcobj(field))
-    # Evaluate all the functions at once and get an iterable of results.
-    #
-    # If any of the functions
-    try:
-        evaluated = session.query(*processed).one()
-    except OperationalError, exception:
-        # HACK original error message is of the form:
-        #
-        #    '(OperationalError) no such function: bogusfuncname'
-        original_error_msg = exception.args[0]
-        bad_function = original_error_msg[37:]
-        exception.function = bad_function
-        raise exception
-    return dict(zip(funcnames, evaluated))
+    if column_names is None:
+        return None, None
+    dotted_names, columns = partition(column_names, lambda name: '.' in name)
+    # Create a dictionary mapping relation names to fields on the related
+    # model.
+    relations = defaultdict(list)
+    for name in dotted_names:
+        relation, field = name.split('.', 1)
+        # Only add the relation if it's column has not been specified.
+        if relation not in columns:
+            relations[relation].append(field)
+    # Relations which are to be excluded entirely need only be in the columns
+    # list, not the relations dictionary.
+    for column in columns:
+        if column in relations:
+            del relations[column]
+    return columns, relations
 
 
 class ModelView(MethodView):
@@ -391,18 +246,21 @@ class FunctionAPI(ModelView):
         """
         try:
             data = json.loads(request.args.get('q')) or {}
-        except (TypeError, ValueError, OverflowError):
+        except (TypeError, ValueError, OverflowError), exception:
+            current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
         try:
-            result = _evaluate_functions(self.session, self.model,
-                                         data.get('functions'))
+            result = evaluate_functions(self.session, self.model,
+                                        data.get('functions'))
             if not result:
                 return jsonify_status_code(204)
             return jsonpify(result)
         except AttributeError, exception:
+            current_app.logger.exception(exception.message)
             message = 'No such field "%s"' % exception.field
             return jsonify_status_code(400, message=message)
         except OperationalError, exception:
+            current_app.logger.exception(exception.message)
             message = 'No such function "%s"' % exception.function
             return jsonify_status_code(400, message=message)
 
@@ -415,7 +273,11 @@ class API(ModelView):
 
     """
 
-    def __init__(self, session, model, validation_exceptions=None,
+    #: List of decorators applied to every method of this class.
+    decorators = [catch_processing_exceptions]
+
+    def __init__(self, session, model, exclude_columns=None,
+                 include_columns=None, validation_exceptions=None,
                  results_per_page=10, max_results_per_page=100,
                  post_form_preprocessor=None, preprocessors=None,
                  postprocessors=None, *args, **kw):
@@ -424,9 +286,8 @@ class API(ModelView):
         `session` is the SQLAlchemy session in which all database transactions
         will be performed.
 
-        `model` is the :class:`flask_restless.Entity` class of the database
-        model for which this instance of the class is an API. This model should
-        live in `database`.
+        `model` is the SQLAlchemy model class for which this instance of the
+        class is an API. This model should live in `database`.
 
         `validation_exceptions` is the tuple of exceptions raised by backend
         validation (if any exist). If exceptions are specified here, any
@@ -434,6 +295,26 @@ class API(ModelView):
         returned to the client as a :http:statuscode:`400` response with a
         message specifying the validation error which occurred. For more
         information, see :ref:`validation`.
+
+        If either `include_columns` or `exclude_columns` is not ``None``,
+        exactly one of them must be specified. If both are not ``None``, then
+        the behavior of this function is undefined. `exclude_columns` must be
+        an iterable of strings specifying the columns of `model` which will
+        *not* be present in the JSON representation of the model provided in
+        response to :http:method:`get` requests.  Similarly, `include_columns`
+        specifies the *only* columns which will be present in the returned
+        dictionary. In other words, `exclude_columns` is a blacklist and
+        `include_columns` is a whitelist; you can only use one of them per API
+        endpoint. If either `include_columns` or `exclude_columns` contains a
+        string which does not name a column in `model`, it will be ignored.
+
+        If `include_columns` is an iterable of length zero (like the empty
+        tuple or the empty list), then the returned dictionary will be
+        empty. If `include_columns` is ``None``, then the returned dictionary
+        will include all columns not excluded by `exclude_columns`.
+
+        See :ref:`includes` for information on specifying included or excluded
+        columns on fields of related models.
 
         `results_per_page` is a positive integer which represents the default
         number of results which are returned per page. Requests made by clients
@@ -477,12 +358,10 @@ class API(ModelView):
 
         .. versionchanged:: 0.10.0
            Removed `authentication_required_for` and `authentication_function`
-           as well as the `include_columns` and `exclude_columns` keyword
-           arguments.
+           keyword arguments.
 
            Use the `preprocesors` and `postprocessors` keyword arguments
-           instead. For more information, see :ref:`authentication` and
-           :ref:`includes` for more information.
+           instead. For more information, see :ref:`authentication`.
 
         .. versionadded:: 0.9.2
            Added the `preprocessors` and `postprocessors` keyword arguments.
@@ -506,6 +385,10 @@ class API(ModelView):
 
         """
         super(API, self).__init__(session, model, *args, **kw)
+        self.exclude_columns, self.exclude_relations = \
+            _parse_excludes(exclude_columns)
+        self.include_columns, self.include_relations = \
+            _parse_includes(include_columns)
         self.validation_exceptions = tuple(validation_exceptions or ())
         self.results_per_page = results_per_page
         self.max_results_per_page = max_results_per_page
@@ -548,24 +431,20 @@ class API(ModelView):
         `toadd` is a list of dictionaries, each representing the attributes of
         an existing or new related model to add. If a dictionary contains the
         key ``'id'``, that instance of the related model will be
-        added. Otherwise, the
-        :classmethod:`~flask.ext.restless.model.get_or_create` class method
-        will be used to get or create a model to add.
+        added. Otherwise, the :func:`helpers.get_or_create` class method will
+        be used to get or create a model to add.
 
         """
         submodel = get_related_model(self.model, relationname)
         if isinstance(toadd, dict):
             toadd = [toadd]
         for dictionary in toadd or []:
-            if 'id' in dictionary:
-                subinst = self._get_by(dictionary['id'], submodel)
-            else:
-                kw = unicode_keys_to_strings(dictionary)
-                subinst = _get_or_create(self.session, submodel, **kw)[0]
+            subinst = get_or_create(self.session, submodel, dictionary)
             try:
                 for instance in query:
                     getattr(instance, relationname).append(subinst)
-            except AttributeError:
+            except AttributeError, exception:
+                current_app.logger.exception(exception.message)
                 setattr(instance, relationname, subinst)
 
     def _remove_from_relation(self, query, relationname, toremove=None):
@@ -598,7 +477,7 @@ class API(ModelView):
         for dictionary in toremove or []:
             remove = dictionary.pop('__delete__', False)
             if 'id' in dictionary:
-                subinst = self._get_by(dictionary['id'], submodel)
+                subinst = get_by(self.session, submodel, dictionary['id'])
             else:
                 kw = unicode_keys_to_strings(dictionary)
                 subinst = self.query(submodel).filter_by(**kw).first()
@@ -622,24 +501,21 @@ class API(ModelView):
         `relationname` is the name of a one-to-many relationship which exists
         on each model specified in `query`.
 
-        `toset` is a list of dictionaries, each representing the attributes of
-        an existing or new related model to set. If a dictionary contains the
-        key ``'id'``, that instance of the related model will be added.
-        Otherwise, the :classmethod:`~flask.ext.restless.model.get_or_create`
-        class method will be used to get or create a model to set.
+        `toset` is either a dictionary or a list of dictionaries, each
+        representing the attributes of an existing or new related model to
+        set. If a dictionary contains the key ``'id'``, that instance of the
+        related model will be added. Otherwise, the
+        :func:`helpers.get_or_create` method will be used to get or create a
+        model to set.
 
         """
         submodel = get_related_model(self.model, relationname)
-        subinst_list = []
-        for dictionary in toset or []:
-            if 'id' in dictionary:
-                subinst = self._get_by(dictionary['id'], submodel)
-            else:
-                kw = unicode_keys_to_strings(dictionary)
-                subinst = _get_or_create(self.session, submodel, **kw)[0]
-            subinst_list.append(subinst)
+        if isinstance(toset, list):
+            value = [get_or_create(self.session, submodel, d) for d in toset]
+        else:
+            value = get_or_create(self.session, submodel, toset)
         for instance in query:
-            setattr(instance, relationname, subinst_list)
+            setattr(instance, relationname, value)
 
     # TODO change this to have more sensible arguments
     def _update_relations(self, query, params):
@@ -681,15 +557,19 @@ class API(ModelView):
         relations = get_relations(self.model)
         tochange = frozenset(relations) & frozenset(params)
         for columnname in tochange:
-            if isinstance(params[columnname], list):
-                toset = params[columnname]
-                self._set_on_relation(query, columnname, toset=toset)
-            else:
+            # Check if 'add' or 'remove' is being used
+            if (isinstance(params[columnname], dict) and
+                any(k in params[columnname] for k in ['add', 'remove'])):
+
                 toadd = params[columnname].get('add', [])
                 toremove = params[columnname].get('remove', [])
                 self._add_to_relation(query, columnname, toadd=toadd)
                 self._remove_from_relation(query, columnname,
                                            toremove=toremove)
+            else:
+                toset = params[columnname]
+                self._set_on_relation(query, columnname, toset=toset)
+
         return tochange
 
     def _handle_validation_exception(self, exception):
@@ -729,7 +609,8 @@ class API(ModelView):
                 left, right = exception.message.rsplit(':', 1)
                 left_bracket = left.rindex('[')
                 right_bracket = right.rindex(']')
-            except ValueError:
+            except ValueError, exception:
+                current_app.logger.exception(exception.message)
                 # could not parse the string; we're not trying too hard here...
                 return None
             msg = right[:right_bracket].strip(' "')
@@ -737,32 +618,99 @@ class API(ModelView):
             return {fieldname: msg}
         return None
 
-    def _strings_to_dates(self, dictionary):
-        """Returns a new dictionary with all the mappings of `dictionary` but
-        with date strings mapped to :class:`datetime.datetime` objects.
-
-        The keys of `dictionary` are names of fields in the model specified in
-        the constructor of this class. The values are values to set on these
-        fields. If a field name corresponds to a field in the model which is a
-        :class:`sqlalchemy.types.Date` or :class:`sqlalchemy.types.DateTime`,
-        then the returned dictionary will have the corresponding
-        :class:`datetime.datetime` Python object as the value of that mapping
-        in place of the string.
-
-        This function outputs a new dictionary; it does not modify the
-        argument.
+    def _compute_results_per_page(self):
+        """Helper function which returns the number of results per page based
+        on the request argument ``results_per_page`` and the server
+        configuration parameters :attr:`results_per_page` and
+        :attr:`max_results_per_page`.
 
         """
-        result = {}
-        for fieldname, value in dictionary.iteritems():
-            if _is_date_field(self.model, fieldname) and value is not None:
-                if value.strip() == '':
-                    result[fieldname] = None
-                else:
-                    result[fieldname] = parse_datetime(value)
-            else:
-                result[fieldname] = value
-        return result
+        try:
+            results_per_page = int(request.args.get('results_per_page'))
+        except:
+            results_per_page = self.results_per_page
+        if results_per_page <= 0:
+            results_per_page = self.results_per_page
+        return min(results_per_page, self.max_results_per_page)
+
+    # TODO it is ugly to have `deep` as an arg here; can we remove it?
+    def _paginated(self, instances, deep):
+        """Returns a paginated JSONified response from the specified list of
+        model instances.
+
+        `instances` is a list of model instances.
+
+        `deep` is the dictionary which defines the depth of submodels to output
+        in the JSON format of the model instances in `instances`; it is passed
+        directly to :func:`helpers.to_dict`.
+
+        The response data is JSON of the form:
+
+        .. sourcecode:: javascript
+
+           {
+             "page": 2,
+             "total_pages": 3,
+             "num_results": 8,
+             "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
+           }
+
+        """
+        num_results = len(instances)
+        results_per_page = self._compute_results_per_page()
+        if results_per_page > 0:
+            # get the page number (first page is page 1)
+            page_num = int(request.args.get('page', 1))
+            start = (page_num - 1) * results_per_page
+            end = min(num_results, start + results_per_page)
+            total_pages = int(math.ceil(num_results / results_per_page))
+        else:
+            page_num = 1
+            start = 0
+            end = num_results
+            total_pages = 1
+        objects = [to_dict(x, deep, exclude=self.exclude_columns,
+                           exclude_relations=self.exclude_relations,
+                           include=self.include_columns,
+                           include_relations=self.include_relations)
+                   for x in instances[start:end]]
+        return dict(page=page_num, objects=objects, total_pages=total_pages,
+                    num_results=num_results)
+
+    def _inst_to_dict(self, inst):
+        """Returns the dictionary representation of the specified instance.
+
+        This method respects the include and exclude columns specified in the
+        constructor of this class.
+
+        """
+        # create a placeholder for the relations of the returned models
+        relations = frozenset(get_relations(self.model))
+        # do not follow relations that will not be included in the response
+        if self.include_columns is not None:
+            cols = frozenset(self.include_columns)
+            rels = frozenset(self.include_relations)
+            relations &= (cols | rels)
+        elif self.exclude_columns is not None:
+            relations -= frozenset(self.exclude_columns)
+        deep = dict((r, {}) for r in relations)
+        return to_dict(inst, deep, exclude=self.exclude_columns,
+                       exclude_relations=self.exclude_relations,
+                       include=self.include_columns,
+                       include_relations=self.include_relations)
+
+    def _instid_to_dict(self, instid):
+        """Returns the dictionary representation of the instance specified by
+        `instid`.
+
+        If no such instance of the model exists, this method aborts with a
+        :http:statuscode:`404`.
+
+        """
+        inst = get_by(self.session, self.model, instid)
+        if inst is None:
+            json_abort(404)
+        return self._inst_to_dict(inst)
 
     def _search(self):
         """Defines a generic search function for the database model.
@@ -813,10 +761,11 @@ class API(ModelView):
         .. sourcecode:: javascript
 
            {
-             "single": "True",
+             "single": true,
              "order_by": [{"field": "age", "direction": "asc"}],
              "limit": 2,
              "offset": 1,
+             "disjunction": true,
              "filters":
                [
                  {"name": "name", "val": "%y%", "op": "like"},
@@ -832,140 +781,50 @@ class API(ModelView):
         """
         # try to get search query from the request query parameters
         try:
-            data = json.loads(request.args.get('q', '{}'))
-        except (TypeError, ValueError, OverflowError):
+            search_params = json.loads(request.args.get('q', '{}'))
+        except (TypeError, ValueError, OverflowError), exception:
+            current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
 
-        # exceptions are caught by the get() method, which calls this one
         for preprocessor in self.preprocessors['GET_MANY']:
-            new_data = preprocessor(data)
-            if new_data is not NO_CHANGE:
-                data = new_data
+            preprocessor(search_params=search_params)
 
         # perform a filtered search
         try:
-            result = search(self.session, self.model, data)
+            result = search(self.session, self.model, search_params)
         except NoResultFound:
             return jsonify_status_code(400, message='No result found')
         except MultipleResultsFound:
             return jsonify_status_code(400, message='Multiple results found')
-        except:
+        except Exception, exception:
+            current_app.logger.exception(exception.message)
             return jsonify_status_code(400,
                                        message='Unable to construct query')
 
         # create a placeholder for the relations of the returned models
         relations = frozenset(get_relations(self.model))
+        # do not follow relations that will not be included in the response
+        if self.include_columns is not None:
+            cols = frozenset(self.include_columns)
+            rels = frozenset(self.include_relations)
+            relations &= (cols | rels)
+        elif self.exclude_columns is not None:
+            relations -= frozenset(self.exclude_columns)
         deep = dict((r, {}) for r in relations)
 
         # for security purposes, don't transmit list as top-level JSON
         if isinstance(result, list):
             result = self._paginated(result, deep)
         else:
-            result = _to_dict(result, deep)
+            result = to_dict(result, deep, exclude=self.exclude_columns,
+                             exclude_relations=self.exclude_relations,
+                             include=self.include_columns,
+                             include_relations=self.include_relations)
 
         for postprocessor in self.postprocessors['GET_MANY']:
-            new_result = postprocessor(result)
-            if new_result is not NO_CHANGE:
-                result = new_result
+            postprocessor(result=result)
 
         return jsonpify(result)
-
-    def _compute_results_per_page(self):
-        """Helper function which returns the number of results per page based
-        on the request argument ``results_per_page`` and the server
-        configuration parameters :attr:`results_per_page` and
-        :attr:`max_results_per_page`.
-
-        """
-        try:
-            results_per_page = int(request.args.get('results_per_page'))
-        except:
-            results_per_page = self.results_per_page
-        if results_per_page <= 0:
-            results_per_page = self.results_per_page
-        return min(results_per_page, self.max_results_per_page)
-
-    # TODO it is ugly to have `deep` as an arg here; can we remove it?
-    def _paginated(self, instances, deep):
-        """Returns a paginated JSONified response from the specified list of
-        model instances.
-
-        `instances` is a list of model instances.
-
-        `deep` is the dictionary which defines the depth of submodels to output
-        in the JSON format of the model instances in `instances`; it is passed
-        directly to :func:`_to_dict`.
-
-        The response data is JSON of the form:
-
-        .. sourcecode:: javascript
-
-           {
-             "page": 2,
-             "total_pages": 3,
-             "num_results": 8,
-             "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
-           }
-
-        """
-        num_results = len(instances)
-        results_per_page = self._compute_results_per_page()
-        if results_per_page > 0:
-            # get the page number (first page is page 1)
-            page_num = int(request.args.get('page', 1))
-            start = (page_num - 1) * results_per_page
-            end = min(num_results, start + results_per_page)
-            total_pages = int(math.ceil(num_results / results_per_page))
-        else:
-            page_num = 1
-            start = 0
-            end = num_results
-            total_pages = 1
-        objects = [_to_dict(x, deep) for x in instances[start:end]]
-        return dict(page=page_num, objects=objects, total_pages=total_pages,
-                    num_results=num_results)
-
-    def _query_by_primary_key(self, primary_key_value, model=None):
-        """Returns a SQLAlchemy query object containing the result of querying
-        `model` (or ``self.model`` if not specified) for instances whose
-        primary key has the value `primary_key_value`.
-
-        Presumably, the returned query should have at most one element.
-
-        """
-        the_model = model or self.model
-        # force unicode primary key name to string; see unicode_keys_to_strings
-        pk_name = str(_primary_key_name(the_model))
-        return self.query(the_model).filter_by(**{pk_name: primary_key_value})
-
-    def _get_by(self, primary_key_value, model=None):
-        """Returns the single instance of `model` (or ``self.model`` if not
-        specified) whose primary key has the value `primary_key_value`, or
-        ``None`` if no such instance exists.
-
-        """
-        return self._query_by_primary_key(primary_key_value, model).first()
-
-    def _inst_to_dict(self, inst):
-        """Returns the dictionary representation of the specified instance.
-        """
-        # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
-        deep = dict((r, {}) for r in relations)
-        return _to_dict(inst, deep)
-
-    def _instid_to_dict(self, instid):
-        """Returns the dictionary representation of the instance specified by
-        `instid`.
-
-        If no such instance of the model exists, this method aborts with a
-        :http:statuscode:`404`.
-
-        """
-        inst = self._get_by(instid)
-        if inst is None:
-            abort(404)
-        return self._inst_to_dict(inst)
 
     def get(self, instid, relationname):
         """Returns a JSON representation of an instance of model with the
@@ -981,38 +840,32 @@ class API(ModelView):
         method responds with :http:status:`404`.
 
         """
-        try:
-            if instid is None:
-                return self._search()
-            for preprocessor in self.preprocessors['GET_SINGLE']:
-                preprocessor(instid)
-            # get the instance of the "main" model whose ID is instid
-            instance = self._get_by(instid)
-            if instance is None:
-                abort(404)
-            # If no relation is requested, just return the instance. Otherwise,
-            # get the value of the relation specified by `relationname`.
-            if relationname is None:
-                result = self._inst_to_dict(instance)
+        if instid is None:
+            return self._search()
+        for preprocessor in self.preprocessors['GET_SINGLE']:
+            preprocessor(instance_id=instid)
+        # get the instance of the "main" model whose ID is instid
+        instance = get_by(self.session, self.model, instid)
+        if instance is None:
+            json_abort(404)
+        # If no relation is requested, just return the instance. Otherwise,
+        # get the value of the relation specified by `relationname`.
+        if relationname is None:
+            result = self._inst_to_dict(instance)
+        else:
+            related_value = getattr(instance, relationname)
+            # create a placeholder for the relations of the returned models
+            related_model = get_related_model(self.model, relationname)
+            relations = frozenset(get_relations(related_model))
+            deep = dict((r, {}) for r in relations)
+            # for security purposes, don't transmit list as top-level JSON
+            if is_like_list(instance, relationname):
+                result = self._paginated(list(related_value), deep)
             else:
-                related_value = getattr(instance, relationname)
-                # create a placeholder for the relations of the returned models
-                related_model = get_related_model(self.model, relationname)
-                relations = frozenset(get_relations(related_model))
-                deep = dict((r, {}) for r in relations)
-                # for security purposes, don't transmit list as top-level JSON
-                if _is_like_list(instance, relationname):
-                    result = self._paginated(list(related_value), deep)
-                else:
-                    result = _to_dict(related_value, deep)
-            for postprocessor in self.postprocessors['GET_SINGLE']:
-                new_result = postprocessor(result)
-                if new_result is not NO_CHANGE:
-                    result = new_result
-            return jsonpify(result)
-        except ProcessingException, e:
-            return jsonify_status_code(status_code=e.status_code,
-                                       message=e.message)
+                result = to_dict(related_value, deep)
+        for postprocessor in self.postprocessors['GET_SINGLE']:
+            postprocessor(result=result)
+        return jsonpify(result)
 
     def delete(self, instid, relationname):
         """Removes the specified instance of the model with the specified name
@@ -1029,25 +882,15 @@ class API(ModelView):
 
         """
         is_deleted = False
-        try:
-            for preprocessor in self.preprocessors['DELETE']:
-                preprocessor(instid)
-        except ProcessingException, e:
-            return jsonify_status_code(status_code=e.status_code,
-                                       message=e.message)
-
-        inst = self._get_by(instid)
+        for preprocessor in self.preprocessors['DELETE']:
+            preprocessor(instance_id=instid)
+        inst = get_by(self.session, self.model, instid)
         if inst is not None:
             self.session.delete(inst)
             self.session.commit()
             is_deleted = True
-        try:
-            for postprocessor in self.postprocessors['DELETE']:
-                postprocessor(is_deleted)
-        except ProcessingException, e:
-            return jsonify_status_code(status_code=e.status_code,
-                                       message=e.message)
-
+        for postprocessor in self.postprocessors['DELETE']:
+            postprocessor(is_deleted=is_deleted)
         return jsonify_status_code(204)
 
     def post(self):
@@ -1073,23 +916,18 @@ class API(ModelView):
         # try to read the parameters for the model from the body of the request
         try:
             params = json.loads(request.data)
-        except (TypeError, ValueError, OverflowError):
+        except (TypeError, ValueError, OverflowError), exception:
+            current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
 
         # apply any preprocessors to the POST arguments
-        try:
-            for preprocessor in self.preprocessors['POST']:
-                new_params = preprocessor(params)
-                if new_params is not NO_CHANGE:
-                    params = new_params
-        except ProcessingException, e:
-            return jsonify_status_code(status_code=e.status_code,
-                                       message=e.message)
+        for preprocessor in self.preprocessors['POST']:
+            preprocessor(data=params)
 
         # Check for any request parameter naming a column which does not exist
         # on the current model.
         for field in params:
-            if not _has_field(self.model, field):
+            if not has_field(self.model, field):
                 msg = "Model does not have field '%s'" % field
                 return jsonify_status_code(400, message=msg)
 
@@ -1104,7 +942,7 @@ class API(ModelView):
 
         # Special case: if there are any dates, convert the string form of the
         # date into an instance of the Python ``datetime`` object.
-        params = self._strings_to_dates(params)
+        params = strings_to_dates(self.model, params)
 
         try:
             # Instantiate the model with the parameters.
@@ -1119,14 +957,13 @@ class API(ModelView):
                 if type(params[col]) == list:
                     # model has several related objects
                     for subparams in params[col]:
-                        kw = unicode_keys_to_strings(subparams)
-                        subinst = _get_or_create(self.session, submodel,
-                                                 **kw)[0]
+                        subinst = get_or_create(self.session, submodel,
+                                                subparams)
                         getattr(instance, col).append(subinst)
                 else:
                     # model has single related object
-                    kw = unicode_keys_to_strings(params[col])
-                    subinst = _get_or_create(self.session, submodel, **kw)[0]
+                    subinst = get_or_create(self.session, submodel,
+                                            params[col])
                     setattr(instance, col, subinst)
 
             # add the created model to the session
@@ -1134,19 +971,15 @@ class API(ModelView):
             self.session.commit()
             result = self._inst_to_dict(instance)
 
-            try:
-                for postprocessor in self.postprocessors['POST']:
-                    new_result = postprocessor(result)
-                    if new_result is not NO_CHANGE:
-                        result = new_result
-            except ProcessingException, e:
-                return jsonify_status_code(status_code=e.status_code,
-                                           message=e.message)
+            for postprocessor in self.postprocessors['POST']:
+                postprocessor(result=result)
+
             return jsonify_status_code(201, **result)
         except self.validation_exceptions, exception:
             return self._handle_validation_exception(exception)
-        except IntegrityError, error:
-            return jsonify_status_code(400, message=error.message)
+        except IntegrityError, exception:
+            current_app.logger.exception(exception.message)
+            return jsonify_status_code(400, message=exception.message)
 
     def patch(self, instid, relationname):
         """Updates the instance specified by ``instid`` of the named model, or
@@ -1172,38 +1005,27 @@ class API(ModelView):
         # try to load the fields/values to update from the body of the request
         try:
             data = json.loads(request.data)
-        except (TypeError, ValueError, OverflowError):
+        except (TypeError, ValueError, OverflowError), exception:
             # this also happens when request.data is empty
+            current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
         # Check if the request is to patch many instances of the current model.
         patchmany = instid is None
         # Perform any necessary preprocessing.
         if patchmany:
-            try:
-                # Get the search parameters; all other keys in the `data`
-                # dictionary indicate a change in the model's field.
-                search_params = data.pop('q', {})
-                for preprocessor in self.preprocessors['PATCH_MANY']:
-                    result = preprocessor(search_params, data)
-                    if result is not NO_CHANGE:
-                        search_params, data = result
-            except ProcessingException, e:
-                return jsonify_status_code(status_code=e.status_code,
-                                           message=e.message)
+            # Get the search parameters; all other keys in the `data`
+            # dictionary indicate a change in the model's field.
+            search_params = data.pop('q', {})
+            for preprocessor in self.preprocessors['PATCH_MANY']:
+                preprocessor(search_params=search_params, data=data)
         else:
-            try:
-                for preprocessor in self.preprocessors['PATCH_SINGLE']:
-                    new_data = preprocessor(instid, data)
-                    if new_data is not NO_CHANGE:
-                        data = new_data
-            except ProcessingException, e:
-                return jsonify_status_code(status_code=e.status_code,
-                                           message=e.message)
+            for preprocessor in self.preprocessors['PATCH_SINGLE']:
+                preprocessor(instance_id=instid, data=data)
 
         # Check for any request parameter naming a column which does not exist
         # on the current model.
         for field in data:
-            if not _has_field(self.model, field):
+            if not has_field(self.model, field):
                 msg = "Model does not have field '%s'" % field
                 return jsonify_status_code(400, message=msg)
 
@@ -1211,14 +1033,15 @@ class API(ModelView):
             try:
                 # create a SQLALchemy Query from the query parameter `q`
                 query = create_query(self.session, self.model, search_params)
-            except:
+            except Exception, exception:
+                current_app.logger.exception(exception.message)
                 return jsonify_status_code(400,
                                            message='Unable to construct query')
         else:
             # create a SQLAlchemy Query which has exactly the specified row
-            query = self._query_by_primary_key(instid)
+            query = query_by_primary_key(self.session, self.model, instid)
             if query.count() == 0:
-                abort(404)
+                json_abort(404)
             assert query.count() == 1, 'Multiple rows with same ID'
 
         relations = self._update_relations(query, data)
@@ -1227,7 +1050,7 @@ class API(ModelView):
 
         # Special case: if there are any dates, convert the string form of the
         # date into an instance of the Python ``datetime`` object.
-        data = self._strings_to_dates(data)
+        data = strings_to_dates(self.model, data)
 
         try:
             # Let's update all instances present in the query
@@ -1239,31 +1062,21 @@ class API(ModelView):
                     num_modified += 1
             self.session.commit()
         except self.validation_exceptions, exception:
+            current_app.logger.exception(exception.message)
             return self._handle_validation_exception(exception)
-        except IntegrityError, error:
-            return jsonify_status_code(400, message=error.message)
+        except IntegrityError, exception:
+            current_app.logger.exception(exception.message)
+            return jsonify_status_code(400, message=exception.message)
 
         # Perform any necessary postprocessing.
         if patchmany:
             result = dict(num_modified=num_modified)
-            try:
-                for postprocessor in self.postprocessors['PATCH_MANY']:
-                    new_result = postprocessor(query, result)
-                    if new_result is not NO_CHANGE:
-                        result = new_result
-            except ProcessingException, e:
-                return jsonify_status_code(status_code=e.status_code,
-                                           message=e.message)
+            for postprocessor in self.postprocessors['PATCH_MANY']:
+                postprocessor(query=query, result=result)
         else:
             result = self._instid_to_dict(instid)
-            try:
-                for postprocessor in self.postprocessors['PATCH_SINGLE']:
-                    new_result = postprocessor(result)
-                    if new_result is not NO_CHANGE:
-                        result = new_result
-            except ProcessingException, e:
-                return jsonify_status_code(status_code=e.status_code,
-                                           message=e.message)
+            for postprocessor in self.postprocessors['PATCH_SINGLE']:
+                postprocessor(result=result)
 
         return jsonify(result)
 

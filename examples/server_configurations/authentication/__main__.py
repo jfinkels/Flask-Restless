@@ -42,7 +42,7 @@ import os.path
 
 from flask import Flask, render_template, redirect, url_for
 from flask.ext.login import current_user, login_user, LoginManager, UserMixin
-from flask.ext.restless import APIManager, ProcessingException
+from flask.ext.restless import APIManager, ProcessingException, NO_CHANGE
 from flask.ext.sqlalchemy import SQLAlchemy
 from flask.ext.wtf import PasswordField, SubmitField, TextField, Form
 
@@ -117,10 +117,9 @@ def login():
 
 
 # Step 8: create the API for User with the authentication guard.
-def auth_func(params):
+def auth_func(**kw):
     if not current_user.is_authenticated():
         raise ProcessingException(message='Not authenticated!')
-    return params
 
 
 api_manager.create_api(User, preprocessors=dict(GET_SINGLE=[auth_func],

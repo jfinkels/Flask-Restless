@@ -47,6 +47,7 @@ class FlaskTestBase(TestCase):
         app.config['DEBUG'] = True
         app.config['TESTING'] = True
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite://'
+        app.logger.disabled = True
         self.flaskapp = app
 
         # create the test client
@@ -136,8 +137,24 @@ class TestSupport(DatabaseTestBase):
 
         class Star(self.Base):
             __tablename__ = 'star'
-            id = Column(Integer, primary_key=True)
+            id = Column("star_id", Integer, primary_key=True)
             inception_time = Column(DateTime, nullable=True)
+
+        class CarModel(self.Base):
+            __tablename__ = 'car_model'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+            seats = Column(Integer)
+
+            manufacturer_id = Column(Integer,
+                                     ForeignKey('car_manufacturer.id'))
+            manufacturer = relationship('CarManufacturer')
+
+        class CarManufacturer(self.Base):
+            __tablename__ = 'car_manufacturer'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+            models = relationship('CarModel')
 
         self.Person = Person
         self.LazyComputer = LazyComputer
@@ -145,6 +162,8 @@ class TestSupport(DatabaseTestBase):
         self.Computer = Computer
         self.Planet = Planet
         self.Star = Star
+        self.CarManufacturer = CarManufacturer
+        self.CarModel = CarModel
 
         # create all the tables required for the models
         self.Base.metadata.create_all()

@@ -14,8 +14,6 @@
 
 from flask import Blueprint
 
-from .helpers import get_related_model
-from .helpers import get_relations
 from .views import API
 from .views import FunctionAPI
 
@@ -32,13 +30,48 @@ class IllegalArgumentError(Exception):
 
 
 class APIManager(object):
-    """Provides a method for creating a public ReSTful JSOn API with respect to
+    """Provides a method for creating a public ReSTful JSON API with respect to
     a given :class:`~flask.Flask` application object.
 
     The :class:`~flask.Flask` object can be specified in the constructor, or
     after instantiation time by calling the :meth:`init_app` method. In any
     case, the application object must be specified before calling the
     :meth:`create_api` method.
+
+    `app` is the :class:`flask.Flask` object containing the user's Flask
+    application.
+
+    `session` is the :class:`sqlalchemy.orm.session.Session` object in which
+    changes to the database will be made.
+
+    `flask_sqlalchemy_db` is the :class:`flask.ext.sqlalchemy.SQLAlchemy`
+    object with which `app` has been registered and which contains the
+    database models for which API endpoints will be created.
+
+    If `flask_sqlalchemy_db` is not ``None``, `session` will be ignored.
+
+    For example, to use this class with models defined in pure SQLAlchemy::
+
+        from flask import Flask
+        from flask.ext.restless import APIManager
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm.session import sessionmaker
+
+        engine = create_engine('sqlite:////tmp/mydb.sqlite')
+        Session = sessionmaker(bind=engine)
+        mysession = Session()
+        app = Flask(__name__)
+        apimanager = APIManager(app, session=mysession)
+
+    and with models defined with Flask-SQLAlchemy::
+
+        from flask import Flask
+        from flask.ext.restless import APIManager
+        from flask.ext.sqlalchemy import SQLAlchemy
+
+        app = Flask(__name__)
+        db = SQLALchemy(app)
+        apimanager = APIManager(app, flask_sqlalchemy_db=db)
 
     """
 
@@ -59,51 +92,6 @@ class APIManager(object):
     BLUEPRINTNAME_FORMAT = '%s%s'
 
     def __init__(self, app=None, session=None, flask_sqlalchemy_db=None):
-        """Stores the specified :class:`flask.Flask` application object on
-        which API endpoints will be registered.
-
-        If `app` is ``None`` or one of `session` and `flask_sqlalchemy_db_` is
-        ``None``, the user must call the :meth:`init_app` method before calling
-        the :meth:`create_api` method.
-
-        `app` is the :class:`flask.Flask` object containing the user's Flask
-        application.
-
-        `session` is the :class:`session.orm.session.Session` object in which
-        changes to the database will be made. It may also be a
-        :class:`session.orm.session.Session` class, in which case a new
-        :class:`sqlalchemy.orm.scoped_session` will be created from it.
-
-        `flask_sqlalchemy_db` is the :class:`flask.ext.sqlalchemy.SQLAlchemy`
-        object with which `app` has been registered and which contains the
-        database models for which API endpoints will be created.
-
-        If `flask_sqlalchemy_db` is not ``None``, `session` will be ignored.
-
-        For example, to use this class with models defined in pure SQLAlchemy::
-
-            from flask import Flask
-            from flask.ext.restless import APIManager
-            from sqlalchemy import create_engine
-            from sqlalchemy.orm.session import sessionmaker
-
-            engine = create_engine('sqlite:////tmp/mydb.sqlite')
-            Session = sessionmaker(bind=engine)
-            mysession = Session()
-            app = Flask(__name__)
-            apimanager = APIManager(app, session=mysession)
-
-        and with models defined with Flask-SQLAlchemy::
-
-            from flask import Flask
-            from flask.ext.restless import APIManager
-            from flask.ext.sqlalchemy import SQLAlchemy
-
-            app = Flask(__name__)
-            db = SQLALchemy(app)
-            apimanager = APIManager(app, flask_sqlalchemy_db=db)
-
-        """
         self.init_app(app, session, flask_sqlalchemy_db)
 
     def _next_blueprint_name(self, basename):
@@ -139,8 +127,8 @@ class APIManager(object):
         :class:`sqlalchemy.orm.session.Session` object in which all database
         changes will be made.
 
-        `session` is the :class:`session.orm.session.Session` object in which
-        changes to the database will be made.
+        `session` is the :class:`sqlalchemy.orm.session.Session` object in
+        which changes to the database will be made.
 
         `flask_sqlalchemy_db` is the :class:`flask.ext.sqlalchemy.SQLAlchemy`
         object with which `app` has been registered and which contains the
@@ -190,6 +178,7 @@ class APIManager(object):
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
                              allow_patch_many=False, allow_functions=False,
+                             exclude_columns=None, include_columns=None,
                              validation_exceptions=None, results_per_page=10,
                              max_results_per_page=100,
                              post_form_preprocessor=None,
@@ -213,9 +202,8 @@ class APIManager(object):
         object specified in the constructor of this class, so you do *not* need
         to register it yourself.
 
-        `model` is the :class:`flask.ext.restless.Entity` class for which a
-        ReSTful interface will be created. Note this must be a class, not an
-        instance of a class.
+        `model` is the SQLAlchemy model class for which a ReSTful interface
+        will be created. Note this must be a class, not an instance of a class.
 
         `methods` specify the HTTP methods which will be made available on the
         ReSTful API for the specified model, subject to the following caveats:
@@ -260,6 +248,27 @@ class APIManager(object):
         if ``False`` by default. Warning: you must not create an API for a
         model whose name is ``'eval'`` if you set this argument to ``True``.
 
+        If either `include_columns` or `exclude_columns` is not ``None``,
+        exactly one of them must be specified. If both are not ``None``, then
+        this function will raise a :exc:`IllegalArgumentError`.
+        `exclude_columns` must be an iterable of strings specifying the columns
+        of `model` which will *not* be present in the JSON representation of
+        the model provided in response to :http:method:`get` requests.
+        Similarly, `include_columns` specifies the *only* columns which will be
+        present in the returned dictionary. In other words, `exclude_columns`
+        is a blacklist and `include_columns` is a whitelist; you can only use
+        one of them per API endpoint. If either `include_columns` or
+        `exclude_columns` contains a string which does not name a column in
+        `model`, it will be ignored.
+
+        If `include_columns` is an iterable of length zero (like the empty
+        tuple or the empty list), then the returned dictionary will be
+        empty. If `include_columns` is ``None``, then the returned dictionary
+        will include all columns not excluded by `exclude_columns`.
+
+        See :ref:`includes` for information on specifying included or excluded
+        columns on fields of related models.
+
         `results_per_page` is a positive integer which represents the default
         number of results which are returned per page. Requests made by clients
         may override this default by specifying ``results_per_page`` as a query
@@ -302,12 +311,10 @@ class APIManager(object):
 
         .. versionchanged:: 0.10.0
            Removed `authentication_required_for` and `authentication_function`
-           as well as the `include_columns` and `exclude_columns` keyword
-           arguments.
+           keyword arguments.
 
            Use the `preprocesors` and `postprocessors` keyword arguments
-           instead. For more information, see :ref:`authentication` and
-           :ref:`includes` for more information.
+           instead. For more information, see :ref:`authentication`.
 
         .. versionadded:: 0.9.2
            Added the `preprocessors` and `postprocessors` keyword arguments.
@@ -338,6 +345,10 @@ class APIManager(object):
            Force the model name in the URL to lowercase.
 
         """
+        if exclude_columns is not None and include_columns is not None:
+            msg = ('Cannot simultaneously specify both include columns and'
+                   ' exclude columns.')
+            raise IllegalArgumentError(msg)
         if collection_name is None:
             collection_name = model.__tablename__
         # convert all method names to upper case
@@ -356,10 +367,11 @@ class APIManager(object):
         # the name of the API, for use in creating the view and the blueprint
         apiname = APIManager.APINAME_FORMAT % collection_name
         # the view function for the API for this model
-        api_view = API.as_view(apiname, self.session, model,
-                               validation_exceptions, results_per_page,
-                               max_results_per_page, post_form_preprocessor,
-                               preprocessors, postprocessors)
+        api_view = API.as_view(apiname, self.session, model, exclude_columns,
+                               include_columns, validation_exceptions,
+                               results_per_page, max_results_per_page,
+                               post_form_preprocessor, preprocessors,
+                               postprocessors)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = self._next_blueprint_name(apiname)
         # add the URL rules to the blueprint: the first is for methods on the
