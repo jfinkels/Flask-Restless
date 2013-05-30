@@ -8,10 +8,33 @@
     :license: GNU AGPLv3+ or BSD
 
 """
-from werkzeug.exceptions import default_exceptions
+from werkzeug.exceptions import default_exceptions, HTTPException
 from flask import abort
 from flask import make_response
-from flask.exceptions import JSONHTTPException
+
+
+class JSONHTTPException(HTTPException):
+    """A base class for HTTP exceptions with ``Content-Type:
+    application/json``.
+
+    The ``description`` attribute of this class must set to a string (*not* an
+    HTML string) which describes the error.
+
+    """
+
+    def get_body(self, environ):
+        """Overrides :meth:`werkzeug.exceptions.HTTPException.get_body` to
+        return the description of this error in JSON format instead of HTML.
+
+        """
+        return json.dumps(dict(description=self.get_description(environ)))
+
+    def get_headers(self, environ):
+        """Returns a list of headers including ``Content-Type:
+        application/json``.
+
+        """
+        return [('Content-Type', 'application/json')]
 
 
 # Adapted from http://flask.pocoo.org/snippets/97
