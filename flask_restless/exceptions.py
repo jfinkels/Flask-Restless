@@ -9,7 +9,7 @@
 
 """
 from werkzeug.exceptions import default_exceptions, HTTPException
-from flask import abort
+from flask import abort, json
 from flask import make_response
 
 
