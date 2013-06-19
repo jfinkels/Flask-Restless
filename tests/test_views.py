@@ -278,6 +278,9 @@ class TestAPI(TestSupport):
         # setup the URLs for the Person and Computer API
         self.manager.create_api(self.Person,
                                 methods=['GET', 'PATCH', 'POST', 'DELETE'])
+        self.manager.create_api(self.Person,
+                                relationname='computers',
+                                methods=['GET', 'PATCH', 'POST', 'DELETE'])
         self.manager.create_api(self.Computer,
                                 methods=['GET', 'POST', 'PATCH'])
 
