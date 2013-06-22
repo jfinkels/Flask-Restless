@@ -379,15 +379,13 @@ class APIManager(object):
                                validation_exceptions, results_per_page,
                                max_results_per_page, post_form_preprocessor,
                                preprocessors, postprocessors)
-        # suffix an integer to apiname according to already existing blueprints
-        blueprintname = self._next_blueprint_name(apiname)
         # add the URL rules to the blueprint: the first is for methods on the
         # collection only, the second is for methods which may or may not
         # specify an instance, the third is for methods which must specify an
         # instance
         # TODO what should the second argument here be?
         # TODO should the url_prefix be specified here or in register_blueprint
-        blueprint = Blueprint(blueprintname, __name__, url_prefix=url_prefix)
+        blueprint = Blueprint(apiname, __name__, url_prefix=url_prefix)
         # For example, /api/person.
         blueprint.add_url_rule(collection_endpoint,
                                methods=no_instance_methods, view_func=api_view)
@@ -448,4 +446,6 @@ class APIManager(object):
 
         """
         blueprint = self.create_api_blueprint(*args, **kw)
+        # suffix an integer to apiname according to already existing blueprints
+        blueprint.name = self._next_blueprint_name(blueprint.name)
         self.app.register_blueprint(blueprint)
