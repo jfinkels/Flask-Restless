@@ -299,7 +299,7 @@ def _parse_excludes(column_names):
     # list, not the relations dictionary.
     for column in columns:
         if column in relations:
-            del relations[column]
+            del relations[column]    
     return columns, relations
 
 
@@ -508,10 +508,10 @@ class API(ModelView):
 
         """
         super(API, self).__init__(session, model, *args, **kw)
-        self.exclude_columns, self.exclude_relations = \
-            _parse_excludes(exclude_columns)
-        self.include_columns, self.include_relations = \
-            _parse_includes(include_columns)
+        self.exclude_columns_global, self.exclude_relations_global = \
+             _parse_excludes(exclude_columns)
+        self.include_columns_global, self.include_relations_global = \
+             _parse_includes(include_columns)
         self.include_methods = include_methods
         self.validation_exceptions = tuple(validation_exceptions or ())
         self.results_per_page = results_per_page
@@ -537,6 +537,12 @@ class API(ModelView):
             self.postprocessors['PATCH_MANY'].append(postprocessor)
         for preprocessor in self.preprocessors['PUT_MANY']:
             self.preprocessors['PATCH_MANY'].append(preprocessor)
+
+    def _reset_include_exclude(self):
+        self.include_columns = list(self.include_columns_global) if self.include_columns_global is not None else None
+        self.include_relations = self.include_relations_global.copy() if self.include_relations_global is not None else None
+        self.exclude_columns = list(self.exclude_columns_global) if self.exclude_columns_global is not None else None
+        self.exclude_relations = self.exclude_relations_global.copy() if self.exclude_relations_global is not None else None
 
     def _add_to_relation(self, query, relationname, toadd=None):
         """Adds a new or existing related model to each model specified by
@@ -916,7 +922,11 @@ class API(ModelView):
             return jsonify_status_code(400, message='Unable to decode data')
 
         for preprocessor in self.preprocessors['GET_MANY']:
-            preprocessor(search_params=search_params)
+            preprocessor(search_params=search_params,
+                         include_columns=self.include_columns,
+                         include_relations=self.include_relations,
+                         exclude_columns=self.exclude_columns,
+                         exclude_relations=self.exclude_relations)
 
         # perform a filtered search
         try:
@@ -983,10 +993,16 @@ class API(ModelView):
         method responds with :http:status:`404`.
 
         """
+        self._reset_include_exclude()
+        
         if instid is None:
             return self._search()
         for preprocessor in self.preprocessors['GET_SINGLE']:
-            preprocessor(instance_id=instid)
+            preprocessor(instance_id=instid, 
+                         include_columns=self.include_columns,
+                         include_relations=self.include_relations,
+                         exclude_columns=self.exclude_columns,
+                         exclude_relations=self.exclude_relations)
         # get the instance of the "main" model whose ID is instid
         instance = get_by(self.session, self.model, instid)
         if instance is None:
@@ -1084,9 +1100,15 @@ class API(ModelView):
             current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
 
+        self._reset_include_exclude()
+
         # apply any preprocessors to the POST arguments
         for preprocessor in self.preprocessors['POST']:
-            preprocessor(data=params)
+            preprocessor(data=params,
+                         include_columns=self.include_columns,
+                         include_relations=self.include_relations,
+                         exclude_columns=self.exclude_columns,
+                         exclude_relations=self.exclude_relations)
 
         # Check for any request parameter naming a column which does not exist
         # on the current model.
@@ -1134,7 +1156,6 @@ class API(ModelView):
             self.session.add(instance)
             self.session.commit()
             result = self._inst_to_dict(instance)
-
             for postprocessor in self.postprocessors['POST']:
                 postprocessor(result=result)
 
@@ -1188,6 +1209,9 @@ class API(ModelView):
             # this also happens when request.data is empty
             current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
+        
+        self._reset_include_exclude()
+            
         # Check if the request is to patch many instances of the current model.
         patchmany = instid is None
         # Perform any necessary preprocessing.
@@ -1196,10 +1220,18 @@ class API(ModelView):
             # dictionary indicate a change in the model's field.
             search_params = data.pop('q', {})
             for preprocessor in self.preprocessors['PATCH_MANY']:
-                preprocessor(search_params=search_params, data=data)
+                preprocessor(search_params=search_params, data=data,
+                             include_columns=self.include_columns,
+                             include_relations=self.include_relations,
+                             exclude_columns=self.exclude_columns,
+                             exclude_relations=self.exclude_relations)
         else:
             for preprocessor in self.preprocessors['PATCH_SINGLE']:
-                preprocessor(instance_id=instid, data=data)
+                preprocessor(instance_id=instid, data=data,
+                             include_columns=self.include_columns,
+                             include_relations=self.include_relations,
+                             exclude_columns=self.exclude_columns,
+                             exclude_relations=self.exclude_relations)
 
         # Check for any request parameter naming a column which does not exist
         # on the current model.
