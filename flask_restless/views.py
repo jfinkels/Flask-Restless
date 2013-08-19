@@ -917,12 +917,14 @@ class API(ModelView):
         # try to get search query from the request query parameters
         try:
             search_params = json.loads(request.args.get('q', '{}'))
+            field_params = json.loads(request.args.get('fields','[]'))
         except (TypeError, ValueError, OverflowError), exception:
             current_app.logger.exception(exception.message)
             return jsonify_status_code(400, message='Unable to decode data')
 
         for preprocessor in self.preprocessors['GET_MANY']:
             preprocessor(search_params=search_params,
+                         field_params=field_params,
                          include_columns=self.include_columns,
                          include_relations=self.include_relations,
                          exclude_columns=self.exclude_columns,
@@ -997,8 +999,16 @@ class API(ModelView):
         
         if instid is None:
             return self._search()
+            
+        try:
+            field_params = json.loads(request.args.get('fields','[]'))
+        except (TypeError, ValueError, OverflowError), exception:
+            current_app.logger.exception(exception.message)
+            return jsonify_status_code(400, message='Unable to decode data')
+            
         for preprocessor in self.preprocessors['GET_SINGLE']:
-            preprocessor(instance_id=instid, 
+            preprocessor(instance_id=instid,
+                         field_params=field_params, 
                          include_columns=self.include_columns,
                          include_relations=self.include_relations,
                          exclude_columns=self.exclude_columns,
