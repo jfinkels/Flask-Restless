@@ -248,8 +248,8 @@ class TestAPIManager(TestSupport):
         for column in 'name', 'age', 'other', 'birth_date', 'computers':
             assert column in loads(response.data)
         response = self.app.get('/all2/person/%s' % personid)
-        for column in 'name', 'age', 'other', 'birth_date', 'computers':
-            assert column in loads(response.data)
+        for column in 'name', 'age', 'other', 'birth_date', 'is_minor':
+            assert column in loads(response.data), column
 
         # get some
         response = self.app.get('/some/person/%s' % personid)
@@ -473,26 +473,8 @@ class TestAPIManager(TestSupport):
         self.session.commit()
 
         self.manager.create_api(self.Person)
+        self.manager.create_api(self.Person, relationname='computers')
         response = self.app.get('/api/person/1/computers')
-        assert 200 == response.status_code
-        data = loads(response.data)
-        assert 'objects' in data
-        assert 1 == len(data['objects'])
-        assert 'foo' == data['objects'][0]['name']
-
-    def test_expose_lazy_relations(self):
-        """Tests that lazy relations are exposed at a URL which is a child of
-        the instance URL.
-
-        """
-        person = self.LazyPerson(name='Test')
-        computer = self.LazyComputer(name='foo')
-        self.session.add(person)
-        person.computers.append(computer)
-        self.session.commit()
-
-        self.manager.create_api(self.LazyPerson)
-        response = self.app.get('/api/lazyperson/1/computers')
         assert 200 == response.status_code
         data = loads(response.data)
         assert 'objects' in data

@@ -103,6 +103,15 @@ def upper_keys(d):
     return dict(zip((k.upper() for k in d.keys()), d.values()))
 
 
+def get_foreign_keys(model):
+    """Yields foreign keys defined in the model."""
+    for name, column in model.__table__.columns.items():
+        foreign_keys = list(column.foreign_keys)
+        if foreign_keys:
+            for key in foreign_keys:
+                yield (name, key)
+
+
 def get_columns(model):
     """Returns a dictionary-like object containing all the columns of the
     specified `model` class.
@@ -156,8 +165,7 @@ def get_related_association_proxy_model(attr):
 
 
 def has_field(model, fieldname):
-    """Returns ``True`` if the `model` has the specified field, and it is not
-    a hybrid property.
+    """Returns ``True`` if the `model` has the specified field.
 
     """
     return (hasattr(model, fieldname) and
@@ -328,6 +336,46 @@ def to_dict(instance, deep=None, exclude=None, include=None,
     # recursively call _to_dict on each of the `deep` relations
     deep = deep or {}
     for relation, rdeep in deep.iteritems():
+        # Skip relation if its included in exclude_columns
+        if exclude and relation in exclude:
+            continue
+
+        # Determine the included and excluded fields for the related model.
+        newexclude = None
+        newinclude = None
+
+        if exclude_relations is not None:
+            if relation in exclude_relations:
+                newexclude = exclude_relations[relation]
+            else:
+                # If the relation is not specifically excluded
+                # then we need to include it
+                newinclude = get_columns(
+                    type(getattr(instance, relation))).keys()
+        elif (include_relations is not None and
+              relation in include_relations):
+            newinclude = include_relations[relation]
+        elif exclude or exclude_relations:
+            # If the relation isn't excluded or included specifically
+            # we should include
+            newinclude = get_columns(type(getattr(instance, relation))).keys()
+
+
+        # Determine the included methods for the related model.
+        newmethods = None
+        if include_methods is not None:
+            newmethods = [method.split('.', 1)[1] for method in include_methods
+                        if method.split('.', 1)[0] == relation]
+
+        # If exclude or include is specified then we shouldn't be
+        # adding relation results if no relation include, exclude,
+        # or methods apply
+        if any(x is not None for x in (exclude, include, exclude_relations,
+                                       include_relations)) \
+                and all(x is None for x in (newexclude, newinclude,
+                                            newmethods)):
+            continue
+
         # Get the related value so we can see if it is None, a list, a query
         # (as specified by a dynamic relationship loader), or an actual
         # instance of a model.
@@ -335,25 +383,14 @@ def to_dict(instance, deep=None, exclude=None, include=None,
         if relatedvalue is None:
             result[relation] = None
             continue
-        # Determine the included and excluded fields for the related model.
-        newexclude = None
-        newinclude = None
-        if exclude_relations is not None and relation in exclude_relations:
-            newexclude = exclude_relations[relation]
-        elif (include_relations is not None and
-              relation in include_relations):
-            newinclude = include_relations[relation]
-        # Determine the included methods for the related model.
-        newmethods = None
-        if include_methods is not None:
-            newmethods = [method.split('.', 1)[1] for method in include_methods
-                        if method.split('.', 1)[0] == relation]
+
         if is_like_list(instance, relation):
             result[relation] = [to_dict(inst, rdeep, exclude=newexclude,
                                         include=newinclude,
                                         include_methods=newmethods)
                                 for inst in relatedvalue]
             continue
+
         # If the related value is dynamically loaded, resolve the query to get
         # the single instance.
         if isinstance(relatedvalue, Query):

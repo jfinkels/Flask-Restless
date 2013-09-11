@@ -56,6 +56,7 @@ from .helpers import strings_to_dates
 from .helpers import to_dict
 from .helpers import unicode_keys_to_strings
 from .helpers import upper_keys
+from .helpers import get_foreign_keys
 from .search import create_query
 from .search import search
 
@@ -841,7 +842,7 @@ class API(ModelView):
             abort(404)
         return self._inst_to_dict(inst)
 
-    def _search(self):
+    def _search(self, model, search_params):
         """Defines a generic search function for the database model.
 
         If the query string is empty, or if the specified query is invalid for
@@ -908,19 +909,11 @@ class API(ModelView):
         responses, see :ref:`searchformat`.
 
         """
-        # try to get search query from the request query parameters
-        try:
-            search_params = json.loads(request.args.get('q', '{}'))
-        except (TypeError, ValueError, OverflowError), exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message='Unable to decode data')
-
         for preprocessor in self.preprocessors['GET_MANY']:
             preprocessor(search_params=search_params)
-
         # perform a filtered search
         try:
-            result = search(self.session, self.model, search_params)
+            result = search(self.session, model, search_params)
         except NoResultFound:
             return jsonify_status_code(400, message='No result found')
         except MultipleResultsFound:
@@ -931,7 +924,7 @@ class API(ModelView):
                                        message='Unable to construct query')
 
         # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
+        relations = frozenset(get_relations(model))
         # do not follow relations that will not be included in the response
         if self.include_columns is not None:
             cols = frozenset(self.include_columns)
@@ -983,8 +976,14 @@ class API(ModelView):
         method responds with :http:status:`404`.
 
         """
+        # try to get search query from the request query parameters
+        try:
+            search_params = json.loads(request.args.get('q', '{}'))
+        except (TypeError, ValueError, OverflowError), exception:
+            current_app.logger.exception(exception.message)
+            return jsonify_status_code(400, message='Unable to decode data')
         if instid is None:
-            return self._search()
+            return self._search(self.model, search_params)
         for preprocessor in self.preprocessors['GET_SINGLE']:
             preprocessor(instance_id=instid)
         # get the instance of the "main" model whose ID is instid
@@ -1003,9 +1002,18 @@ class API(ModelView):
             deep = dict((r, {}) for r in relations)
             # for security purposes, don't transmit list as top-level JSON
             if is_like_list(instance, relationname):
-                result = self._paginated(list(related_value), deep)
+                for colname, key in get_foreign_keys(related_model):
+                    if "%s.%s" % (self.model.__tablename__,
+                                  primary_key_name(self.model)) in repr(key):
+                        if not 'filters' in search_params:
+                            search_params['filters'] = []
+                        search_params['filters'].append({'name': colname,
+                                                         'op': '==',
+                                                         'val': instid})
+
+                return self._search(related_model, search_params)
             else:
-                result = to_dict(related_value, deep)
+                result = self._inst_to_dict(related_value, deep)
         for postprocessor in self.postprocessors['GET_SINGLE']:
             postprocessor(result=result)
         return jsonpify(result)
