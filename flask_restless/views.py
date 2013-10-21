@@ -436,10 +436,8 @@ class API(ModelView):
         See :ref:`includes` for information on specifying included or excluded
         columns on fields of related models.
 
-        If `include_relations` is True, then the returned dictionary will include
-        the full related tree. This value will respect the values of `include_columns`
-        and `exclude_columns`. If `include_relations` is False, then only the
-        foreign key value will be included.
+        If `exclude_all_relations` is True, then the returned dictionary will include
+        no related objects
 
         `results_per_page` is a positive integer which represents the default
         number of results which are returned per page. Requests made by clients
