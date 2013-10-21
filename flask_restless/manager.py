@@ -182,7 +182,8 @@ class APIManager(object):
                              include_methods=None, validation_exceptions=None,
                              results_per_page=10, max_results_per_page=100,
                              post_form_preprocessor=None,
-                             preprocessors=None, postprocessors=None):
+                             preprocessors=None, postprocessors=None,
+                             exclude_all_relations=False):
         """Creates an returns a ReSTful API interface as a blueprint, but does
         not register it on any :class:`flask.Flask` application.
 
@@ -272,6 +273,9 @@ class APIManager(object):
 
         See :ref:`includes` for information on specifying included or excluded
         columns on fields of related models.
+
+        If `exclude_all_relations` is True, then the returned dictionary will include
+        no related objects
 
         `results_per_page` is a positive integer which represents the default
         number of results which are returned per page. Requests made by clients
@@ -378,7 +382,7 @@ class APIManager(object):
                                include_columns, include_methods,
                                validation_exceptions, results_per_page,
                                max_results_per_page, post_form_preprocessor,
-                               preprocessors, postprocessors)
+                               preprocessors, postprocessors, exclude_all_relations)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = self._next_blueprint_name(apiname)
         # add the URL rules to the blueprint: the first is for methods on the
