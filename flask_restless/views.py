@@ -39,6 +39,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm.exc import MultipleResultsFound
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm.query import Query
+from werkzeug.exceptions import HTTPException
 
 from .helpers import evaluate_functions
 from .helpers import get_by
@@ -62,9 +63,6 @@ from .search import search
 
 #: Format string for creating Link headers in paginated responses.
 LINKTEMPLATE = '<%s?page=%s&results_per_page=%s>; rel="%s"'
-
-
-from werkzeug.exceptions import HTTPException
 
 class ProcessingException(HTTPException):
     """Raised when a preprocessor or postprocessor encounters a problem.
