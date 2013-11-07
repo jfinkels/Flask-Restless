@@ -1224,7 +1224,17 @@ class API(ModelView):
                 abort(404)
             assert query.count() == 1, 'Multiple rows with same ID'
 
-        relations = self._update_relations(query, data)
+        try:
+            # when update relations of current model
+            # if there is an column that is not specified in the relationship
+            # server crash but should have given a note down to the client
+            # as it was nice done to the same situation that might
+            # occur to current model
+            relations = self._update_relations(query, data)
+        except TypeError, exception:
+            current_app.logger.exception(exception.message)
+            return jsonify_status_code(400, message=exception.message)
+
         field_list = frozenset(data) ^ relations
         data = dict((field, data[field]) for field in field_list)
 
