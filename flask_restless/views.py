@@ -395,7 +395,7 @@ class API(ModelView):
                  include_columns=None, include_methods=None,
                  validation_exceptions=None, results_per_page=10,
                  max_results_per_page=100, post_form_preprocessor=None,
-                 preprocessors=None, postprocessors=None, *args, **kw):
+                 preprocessors=None, postprocessors=None, exclude_all_relations=False, *args, **kw):
         """Instantiates this view with the specified attributes.
 
         `session` is the SQLAlchemy session in which all database transactions
@@ -434,6 +434,9 @@ class API(ModelView):
 
         See :ref:`includes` for information on specifying included or excluded
         columns on fields of related models.
+
+        If `exclude_all_relations` is True, then the returned dictionary will include
+        no related objects
 
         `results_per_page` is a positive integer which represents the default
         number of results which are returned per page. Requests made by clients
@@ -512,6 +515,7 @@ class API(ModelView):
         self.include_columns, self.include_relations = \
             _parse_includes(include_columns)
         self.include_methods = include_methods
+        self.exclude_all_relations = exclude_all_relations
         self.validation_exceptions = tuple(validation_exceptions or ())
         self.results_per_page = results_per_page
         self.max_results_per_page = max_results_per_page
@@ -811,7 +815,7 @@ class API(ModelView):
 
         """
         # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
+        relations = frozenset() if self.exclude_all_relations else frozenset(get_relations(self.model))
         # do not follow relations that will not be included in the response
         if self.include_columns is not None:
             cols = frozenset(self.include_columns)
@@ -928,7 +932,7 @@ class API(ModelView):
             return jsonify(message='Unable to construct query'), 400
 
         # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
+        relations = frozenset() if self.exclude_all_relations else frozenset(get_relations(self.model))
         # do not follow relations that will not be included in the response
         if self.include_columns is not None:
             cols = frozenset(self.include_columns)
@@ -996,7 +1000,7 @@ class API(ModelView):
             related_value = getattr(instance, relationname)
             # create a placeholder for the relations of the returned models
             related_model = get_related_model(self.model, relationname)
-            relations = frozenset(get_relations(related_model))
+            relations = frozenset() if self.exclude_all_relations else frozenset(get_relations(related_model))
             deep = dict((r, {}) for r in relations)
             if relationinstid is not None:
                 related_value_instance = get_by(self.session, related_model, relationinstid)
