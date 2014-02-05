@@ -191,7 +191,7 @@ class Filter(object):
         fieldname = dictionary.get('name')
         operator = dictionary.get('op')
         argument = dictionary.get('val')
-        otherfield = dictionary.get('field')
+        otherfield = dictionary.get('other')
         return Filter(fieldname, operator, argument, otherfield)
 
 
