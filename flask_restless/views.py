@@ -1228,8 +1228,12 @@ class API(ModelView):
             if query.count() == 0:
                 abort(404)
             assert query.count() == 1, 'Multiple rows with same ID'
-
-        relations = self._update_relations(query, data)
+       
+        try:
+            relations = self._update_relations(query, data)
+        except self.validation_exceptions as exception:
+            current_app.logger.exception(exception.message)
+            return self._handle_validation_exception(exception)
         field_list = frozenset(data) ^ relations
         data = dict((field, data[field]) for field in field_list)
 
