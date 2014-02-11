@@ -782,7 +782,7 @@ class API(ModelView):
         if type(instances) == list:
             num_results = len(instances)
         else:
-            num_results = instances.count()
+            num_results = self.query(self.model.id).count()
         results_per_page = self._compute_results_per_page()
         if results_per_page > 0:
             # get the page number (first page is page 1)
