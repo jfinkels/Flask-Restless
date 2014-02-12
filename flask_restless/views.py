@@ -34,6 +34,7 @@ from flask import json
 from flask import jsonify as _jsonify
 from flask import request
 from flask.views import MethodView
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm.exc import MultipleResultsFound
@@ -782,7 +783,9 @@ class API(ModelView):
         if type(instances) == list:
             num_results = len(instances)
         else:
-            num_results = instances.count()
+            num_results = self.session.execute(instances.statement.with_only_columns([func.count()]).order_by(None)).scalar()
+            if num_results is None:
+                num_results = instances.count()
         results_per_page = self._compute_results_per_page()
         if results_per_page > 0:
             # get the page number (first page is page 1)
