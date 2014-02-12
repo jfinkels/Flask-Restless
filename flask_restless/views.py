@@ -785,7 +785,7 @@ class API(ModelView):
         else:
             num_results = self.session.execute(instances.statement.with_only_columns([func.count()]).order_by(None)).scalar()
             if num_results is None:
-                num_results = 0
+                num_results = instances.count()
         results_per_page = self._compute_results_per_page()
         if results_per_page > 0:
             # get the page number (first page is page 1)
