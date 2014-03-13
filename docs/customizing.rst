@@ -608,6 +608,29 @@ filters* to the ``search_params`` keyword argument. For example::
 
     apimanager.create_api(Person, preprocessors=dict(GET_MANY=[preprocessor]))
 
+Custom queries
+--------------
+
+In cases where it is not possible to use preprocessors or postprocessors
+(:ref:`processors`) efficiently, you can provide a custom ``query`` attribute
+to your model instead. The attribute can either be a callable that returns a
+query::
+
+    class Person(Base):
+        __tablename__ = 'person'
+        id = Column(Integer, primary_key=True)
+
+        @classmethod
+        def query(cls):
+            return get_query_for_current_user(cls)
+
+or a SQLAlchemy query expression::
+
+    class Person(Base):
+        __tablename__ = 'person'
+        id = Column(Integer, primary_key=True)
+        query = get_some_query()
+
 .. _authentication:
 
 Requiring authentication for some methods

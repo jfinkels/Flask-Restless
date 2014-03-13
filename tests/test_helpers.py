@@ -13,7 +13,11 @@ from datetime import datetime
 import uuid
 
 from nose.tools import assert_raises
+from sqlalchemy import Column
+from sqlalchemy import ForeignKey
+from sqlalchemy import Integer
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import relationship
 
 from flask.ext.restless.helpers import evaluate_functions
 from flask.ext.restless.helpers import get_columns
@@ -22,9 +26,63 @@ from flask.ext.restless.helpers import partition
 from flask.ext.restless.helpers import primary_key_name
 from flask.ext.restless.helpers import to_dict
 from flask.ext.restless.helpers import upper_keys
+from flask.ext.restless.helpers import get_by
 
 from .helpers import TestSupport
 from .helpers import TestSupportPrefilled
+from .helpers import DatabaseTestBase
+
+
+class TestSessionQuery(DatabaseTestBase):
+    """Unit test for the :func:`session_query` function."""
+
+    def setUp(self):
+        """Creates example tables to test the various behaviours of
+        :func:`session_query`.
+
+        """
+        super(TestSessionQuery, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            family_id = Column(Integer, ForeignKey('family.id'))
+            family = relationship('Family')
+
+            @classmethod
+            def query(cls):
+                person = self.session.query(Person)
+                return person.join((Family, Person.family_id == Family.id))
+
+        class Family(self.Base):
+            __tablename__ = 'family'
+            id = Column(Integer, primary_key=True)
+
+        self.Person = Person
+        self.Family = Family
+
+        # create all the tables required for the models
+        self.Base.metadata.create_all()
+
+    def tearDown(self):
+        """Drops all tables from the temporary database."""
+        self.Base.metadata.drop_all()
+
+    def test_callable_query(self):
+        """Test for :func:`session_query` when the model has a callable
+        ``query`` attribute.
+
+        """
+        family = self.Family()
+        person1 = self.Person(family=family)
+        person2 = self.Person(family=family)
+        self.session.add(family)
+        self.session.add(person1)
+        self.session.add(person2)
+        self.session.commit()
+
+        person_test = get_by(self.session, self.Person, person1.id)
+        assert person1 == person_test
 
 
 class TestHelpers(object):
