@@ -1195,7 +1195,11 @@ class API(ModelView):
 
         # Special case: if there are any dates, convert the string form of the
         # date into an instance of the Python ``datetime`` object.
-        params = strings_to_dates(self.model, params)
+        try:
+            params = strings_to_dates(self.model, params)
+        except ValueError as exception:
+            current_app.logger.exception(str(exception))
+            return dict(validation_errors=str(exception)), 400
 
         try:
             # Instantiate the model with the parameters.

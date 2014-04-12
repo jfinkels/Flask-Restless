@@ -425,6 +425,20 @@ class TestAPI(TestSupport):
         assert response.status_code == 200
         assert loads(response.data)['inception_time'] is None
 
+    def test_post_valid_date_string(self):
+        self.manager.create_api(self.Star, methods=['POST'])
+        data = dict(inception_time="2013-03-02")
+        response = self.app.post('/api/star', data=dumps(data))
+
+        assert response.status_code == 201
+
+    def test_post_invalid_date_string(self):
+        self.manager.create_api(self.Star, methods=['POST'])
+        data = dict(inception_time="0000-00-00")
+        response = self.app.post('/api/star', data=dumps(data))
+
+        assert response.status_code == 400
+
     def test_post_date_functions(self):
         """Tests that ``'CURRENT_TIMESTAMP'`` gets converted into a datetime
         object when making a request to set a date or time field.
