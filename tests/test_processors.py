@@ -53,6 +53,8 @@ class TestProcessors(TestSupport):
         assert 201 == response.status_code
         response = self.app.get('/api/person/1')
         assert response.status_code == 403
+        json_resp = loads(response.data)
+        assert 'Permission denied' == json_resp['message']
 
     def test_get_many_postprocessor(self):
         filt = dict(name='id', op='in', val=[1, 3])
@@ -127,6 +129,8 @@ class TestProcessors(TestSupport):
         response = self.app.post('/api/v3/person',
                                  data=dumps({'name': u'Lincoln', 'age': 23}))
         assert response.status_code == 403
+        json_resp = loads(response.data)
+        assert 'Permission denied' == json_resp['message']
 
     def test_delete_preprocessor(self):
         """Tests for using a preprocessor with :http:method:`delete` requests.
@@ -153,6 +157,8 @@ class TestProcessors(TestSupport):
         # Try deleting it
         response = self.app.delete('/api/person/1')
         assert response.status_code == 403
+        json_resp = loads(response.data)
+        assert 'Permission denied' == json_resp['message']
 
         # Making sure it has been not deleted
         people = self.session.query(self.Person).filter_by(id=1)
@@ -184,6 +190,8 @@ class TestProcessors(TestSupport):
         # Try updating people with id=1
         response = self.app.patch('/api/person/1', data=dumps({'age': 27}))
         assert response.status_code == 403
+        json_resp = loads(response.data)
+        assert 'Permission denied' == json_resp['message']
 
     def test_patch_single_preprocessor2(self):
         """Tests for using a preprocessor with :http:method:`patch` requests.

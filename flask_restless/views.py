@@ -86,8 +86,8 @@ class ProcessingException(HTTPException):
     preprocessing or postprocessing halts, so any processors appearing later in
     the list will not be invoked.
 
-    `status_code` is the HTTP status code of the response supplied to the
-    client in the case that this exception is raised. `message` is an error
+    `code` is the HTTP status code of the response supplied to the
+    client in the case that this exception is raised. `description` is an error
     message describing the cause of this exception. This message will appear in
     the JSON object in the body of the response to the client.
 
@@ -139,7 +139,7 @@ def catch_processing_exceptions(func):
             return func(*args, **kw)
         except ProcessingException as exception:
             current_app.logger.exception(str(exception))
-            status, message = exception.code, str(exception)
+            status, message = exception.code, exception.description
             return jsonify(message=message), status
     return decorator
 
