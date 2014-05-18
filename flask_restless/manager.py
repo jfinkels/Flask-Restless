@@ -93,9 +93,9 @@ class APIManager(object):
     BLUEPRINTNAME_FORMAT = '{0}{1}'
 
     def __init__(self, app=None, session=None, flask_sqlalchemy_db=None,
-                 preprocessors=None, postprocessors=None):
+                 preprocessors=None, postprocessors=None, view_class=None):
         self.init_app(app, session, flask_sqlalchemy_db, preprocessors,
-                      postprocessors)
+                      postprocessors, view_class)
 
     def _next_blueprint_name(self, basename):
         """Returns the next name for a blueprint with the specified base name.
@@ -125,7 +125,7 @@ class APIManager(object):
         return APIManager.BLUEPRINTNAME_FORMAT.format(basename, next_number)
 
     def init_app(self, app, session=None, flask_sqlalchemy_db=None,
-                 preprocessors=None, postprocessors=None):
+                 preprocessors=None, postprocessors=None, view_class=None):
         """Stores the specified :class:`flask.Flask` application object on
         which API endpoints will be registered and the
         :class:`sqlalchemy.orm.session.Session` object in which all database
@@ -194,6 +194,7 @@ class APIManager(object):
         self.session = session or getattr(flask_sqlalchemy_db, 'session', None)
         self.universal_preprocessors = preprocessors or {}
         self.universal_postprocessors = postprocessors or {}
+        self.view_class = view_class or API
 
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
@@ -414,7 +415,7 @@ class APIManager(object):
         for key, value in self.universal_postprocessors.items():
             postprocessors_[key] = value + postprocessors_[key]
         # the view function for the API for this model
-        api_view = API.as_view(apiname, self.session, model, exclude_columns,
+        api_view = self.view_class.as_view(apiname, self.session, model, exclude_columns,
                                include_columns, include_methods,
                                validation_exceptions, results_per_page,
                                max_results_per_page, post_form_preprocessor,
