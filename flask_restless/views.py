@@ -59,6 +59,7 @@ from .helpers import session_query
 from .helpers import strings_to_dates
 from .helpers import to_dict
 from .helpers import upper_keys
+from .helpers import is_mapped_class
 from werkzeug.exceptions import BadRequest
 
 from .search import create_query
@@ -861,15 +862,62 @@ class API(ModelView):
             start = 0
             end = num_results
             total_pages = 1
-        objects = [to_dict(x, deep, exclude=self.exclude_columns,
-                           exclude_relations=self.exclude_relations,
-                           include=self.include_columns,
-                           include_relations=self.include_relations,
-                           include_methods=self.include_methods)
+        objects = [self._to_dict(x, deep)
                    for x in instances[start:end]]
         return dict(page=page_num, objects=objects, total_pages=total_pages,
                     num_results=num_results)
 
+    
+    def _to_dict(self, instance, deep=None, relation=None):
+        if relation:
+            exclude_columns = None
+            include_columns = None
+            include_methods = None
+            # Determine the included and excluded fields for the related model.
+            if self.exclude_relations is not None and relation in self.exclude_relations:
+                exclude_columns = self.exclude_relations[relation]
+            elif (self.include_relations is not None and
+                  relation in self.include_relations):
+                include_columns = self.include_relations[relation]
+            
+            # Determine the included methods for the related model.
+            if self.include_methods is not None:
+                include_methods = [method.split('.', 1)[1] for method in self.include_methods
+                              if method.split('.', 1)[0] == relation]
+
+        else:
+            exclude_columns = self.exclude_columns
+            include_columns = self.include_columns
+            include_methods = self.include_methods
+
+        result = to_dict(instance, exclude=exclude_columns,
+            include=include_columns, include_methods=include_methods,
+            )
+        
+        # recursively call _to_dict on each of the `deep` relations
+        deep = deep or {}
+        for relation, rdeep in deep.items():
+            # Get the related value so we can see if it is None, a list, a query
+            # (as specified by a dynamic relationship loader), or an actual
+            # instance of a model.
+            relatedvalue = getattr(instance, relation)
+            if relatedvalue is None:
+                result[relation] = None
+                continue
+            
+            if is_like_list(instance, relation):
+                result[relation] = [self._to_dict(inst, rdeep, relation=relation)
+                                    for inst in relatedvalue]
+                continue
+            # If the related value is dynamically loaded, resolve the query to get
+            # the single instance.
+            if isinstance(relatedvalue, Query):
+                relatedvalue = relatedvalue.one()
+            result[relation] = self._to_dict(relatedvalue, rdeep, relation=relation)
+        return result
+
+        
+        
     def _inst_to_dict(self, inst):
         """Returns the dictionary representation of the specified instance.
 
@@ -887,11 +935,7 @@ class API(ModelView):
         elif self.exclude_columns is not None:
             relations -= frozenset(self.exclude_columns)
         deep = dict((r, {}) for r in relations)
-        return to_dict(inst, deep, exclude=self.exclude_columns,
-                       exclude_relations=self.exclude_relations,
-                       include=self.include_columns,
-                       include_relations=self.include_relations,
-                       include_methods=self.include_methods)
+        return self._to_dict(inst, deep)
 
     def _instid_to_dict(self, instid):
         """Returns the dictionary representation of the instance specified by
@@ -1018,11 +1062,7 @@ class API(ModelView):
             headers = dict(Link=linkstring)
         else:
             primary_key = primary_key_name(result)
-            result = to_dict(result, deep, exclude=self.exclude_columns,
-                             exclude_relations=self.exclude_relations,
-                             include=self.include_columns,
-                             include_relations=self.include_relations,
-                             include_methods=self.include_methods)
+            result = self._to_dict(result, deep)
             # The URL at which a client can access the instance matching this
             # search query.
             url = '{0}/{1}'.format(request.base_url, result[primary_key])
@@ -1074,13 +1114,13 @@ class API(ModelView):
                                                 relationinstid)
                 if related_value_instance is None:
                     return {_STATUS: 404}, 404
-                result = to_dict(related_value_instance, deep)
+                result = self._to_dict(related_value_instance, deep)
             else:
                 # for security purposes, don't transmit list as top-level JSON
                 if is_like_list(instance, relationname):
                     result = self._paginated(list(related_value), deep)
                 else:
-                    result = to_dict(related_value, deep)
+                    result = self._to_dict(related_value, deep)
         if result is None:
             return {_STATUS: 404}, 404
         for postprocessor in self.postprocessors['GET_SINGLE']:

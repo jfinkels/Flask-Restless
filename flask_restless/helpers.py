@@ -252,9 +252,7 @@ def is_mapped_class(cls):
 
 # This code was adapted from :meth:`elixir.entity.Entity.to_dict` and
 # http://stackoverflow.com/q/1958219/108197.
-def to_dict(instance, deep=None, exclude=None, include=None,
-            exclude_relations=None, include_relations=None,
-            include_methods=None):
+def to_dict(instance, exclude=None, include=None, include_methods=None):
     """Returns a dictionary representing the fields of the specified `instance`
     of a SQLAlchemy model.
 
@@ -294,8 +292,7 @@ def to_dict(instance, deep=None, exclude=None, include=None,
     be called and their return values added to the returned dictionary.
 
     """
-    if (exclude is not None or exclude_relations is not None) and \
-            (include is not None or include_relations is not None):
+    if (exclude is not None) and (include is not None):
         raise ValueError('Cannot specify both include and exclude.')
     # create a list of names of columns, including hybrid properties
     instance_type = type(instance)
@@ -322,52 +319,15 @@ def to_dict(instance, deep=None, exclude=None, include=None,
         result.update(dict((method, getattr(instance, method)())
                            for method in include_methods
                            if not '.' in method))
-    # Check for objects in the dictionary that may not be serializable by
-    # default. Convert datetime objects to ISO 8601 format, convert UUID
-    # objects to hexadecimal strings, etc.
+    
     for key, value in result.items():
         if isinstance(value, (datetime.date, datetime.time)):
             result[key] = value.isoformat()
         elif isinstance(value, uuid.UUID):
             result[key] = str(value)
         elif key not in column_attrs and is_mapped_class(type(value)):
-            result[key] = to_dict(value)
-    # recursively call _to_dict on each of the `deep` relations
-    deep = deep or {}
-    for relation, rdeep in deep.items():
-        # Get the related value so we can see if it is None, a list, a query
-        # (as specified by a dynamic relationship loader), or an actual
-        # instance of a model.
-        relatedvalue = getattr(instance, relation)
-        if relatedvalue is None:
-            result[relation] = None
-            continue
-        # Determine the included and excluded fields for the related model.
-        newexclude = None
-        newinclude = None
-        if exclude_relations is not None and relation in exclude_relations:
-            newexclude = exclude_relations[relation]
-        elif (include_relations is not None and
-              relation in include_relations):
-            newinclude = include_relations[relation]
-        # Determine the included methods for the related model.
-        newmethods = None
-        if include_methods is not None:
-            newmethods = [method.split('.', 1)[1] for method in include_methods
-                          if method.split('.', 1)[0] == relation]
-        if is_like_list(instance, relation):
-            result[relation] = [to_dict(inst, rdeep, exclude=newexclude,
-                                        include=newinclude,
-                                        include_methods=newmethods)
-                                for inst in relatedvalue]
-            continue
-        # If the related value is dynamically loaded, resolve the query to get
-        # the single instance.
-        if isinstance(relatedvalue, Query):
-            relatedvalue = relatedvalue.one()
-        result[relation] = to_dict(relatedvalue, rdeep, exclude=newexclude,
-                                   include=newinclude,
-                                   include_methods=newmethods)
+            result[key] = self._to_dict(value)
+    
     return result
 
 
