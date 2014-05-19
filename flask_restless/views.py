@@ -894,6 +894,8 @@ class API(ModelView):
             include=include_columns, include_methods=include_methods,
             )
         
+        self._clean_dict(result)
+        
         # recursively call _to_dict on each of the `deep` relations
         deep = deep or {}
         for relation, rdeep in deep.items():
@@ -917,6 +919,15 @@ class API(ModelView):
         return result
 
         
+    def _clean_dict(self, result):
+        for key, value in result.items():
+            if isinstance(value, (datetime.date, datetime.time)):
+                result[key] = value.isoformat()
+            elif isinstance(value, uuid.UUID):
+                result[key] = str(value)
+            elif is_mapped_class(type(value)):
+                result[key] = self._to_dict(value, relation=key)
+
         
     def _inst_to_dict(self, inst):
         """Returns the dictionary representation of the specified instance.

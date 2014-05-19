@@ -319,15 +319,6 @@ def to_dict(instance, exclude=None, include=None, include_methods=None):
         result.update(dict((method, getattr(instance, method)())
                            for method in include_methods
                            if not '.' in method))
-    
-    for key, value in result.items():
-        if isinstance(value, (datetime.date, datetime.time)):
-            result[key] = value.isoformat()
-        elif isinstance(value, uuid.UUID):
-            result[key] = str(value)
-        elif key not in column_attrs and is_mapped_class(type(value)):
-            result[key] = self._to_dict(value)
-    
     return result
 
 
