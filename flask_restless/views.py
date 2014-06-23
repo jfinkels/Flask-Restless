@@ -822,7 +822,7 @@ class API(ModelView):
         return min(results_per_page, self.max_results_per_page)
 
     # TODO it is ugly to have `deep` as an arg here; can we remove it?
-    def _paginated(self, instances, deep):
+    def _paginated(self, instances, deep, include_columns=None):
         """Returns a paginated JSONified response from the specified list of
         model instances.
 
@@ -861,36 +861,48 @@ class API(ModelView):
             start = 0
             end = num_results
             total_pages = 1
-        objects = [to_dict(x, deep, exclude=self.exclude_columns,
-                           exclude_relations=self.exclude_relations,
-                           include=self.include_columns,
-                           include_relations=self.include_relations,
+        if include_columns is not None:
+            incols, inrels = _parse_includes(include_columns)
+            excols, exrels = None, None
+        else:
+            incols, inrels = self.include_columns, self.include_relations
+            excols, exrels = self.exclude_columns, self.exclude_relations
+        objects = [to_dict(x, deep, exclude=excols,
+                           exclude_relations=exrels,
+                           include=incols,
+                           include_relations=inrels,
                            include_methods=self.include_methods)
                    for x in instances[start:end]]
         return dict(page=page_num, objects=objects, total_pages=total_pages,
                     num_results=num_results)
 
-    def _inst_to_dict(self, inst):
+    def _inst_to_dict(self, inst, include_columns=None):
         """Returns the dictionary representation of the specified instance.
 
         This method respects the include and exclude columns specified in the
         constructor of this class.
 
         """
+        if include_columns is not None:
+            incols, inrels = _parse_includes(include_columns)
+            excols, exrels = None, None
+        else:
+            incols, inrels = self.include_columns, self.include_relations
+            excols, exrels = self.exclude_columns, self.exclude_relations
         # create a placeholder for the relations of the returned models
         relations = frozenset(get_relations(self.model))
         # do not follow relations that will not be included in the response
-        if self.include_columns is not None:
-            cols = frozenset(self.include_columns)
-            rels = frozenset(self.include_relations)
+        if incols is not None:
+            cols = frozenset(incols)
+            rels = frozenset(inrels)
             relations &= (cols | rels)
-        elif self.exclude_columns is not None:
-            relations -= frozenset(self.exclude_columns)
+        elif excols is not None:
+            relations -= frozenset(excols)
         deep = dict((r, {}) for r in relations)
-        return to_dict(inst, deep, exclude=self.exclude_columns,
-                       exclude_relations=self.exclude_relations,
-                       include=self.include_columns,
-                       include_relations=self.include_relations,
+        return to_dict(inst, deep, exclude=excols,
+                       exclude_relations=exrels,
+                       include=incols,
+                       include_relations=inrels,
                        include_methods=self.include_methods)
 
     def _instid_to_dict(self, instid):
@@ -906,7 +918,7 @@ class API(ModelView):
             return {_STATUS: 404}, 404
         return self._inst_to_dict(inst)
 
-    def _search(self):
+    def _search(self, include_columns=None):
         """Defines a generic search function for the database model.
 
         If the query string is empty, or if the specified query is invalid for
@@ -973,6 +985,12 @@ class API(ModelView):
         responses, see :ref:`searchformat`.
 
         """
+        if include_columns is not None:
+            incols, inrels = _parse_includes(include_columns)
+            excols, exrels = None, None
+        else:
+            incols, inrels = self.include_columns, self.include_relations
+            excols, exrels = self.exclude_columns, self.exclude_relations
         # try to get search query from the request query parameters
         try:
             search_params = json.loads(request.args.get('q', '{}'))
@@ -997,17 +1015,17 @@ class API(ModelView):
         # create a placeholder for the relations of the returned models
         relations = frozenset(get_relations(self.model))
         # do not follow relations that will not be included in the response
-        if self.include_columns is not None:
-            cols = frozenset(self.include_columns)
-            rels = frozenset(self.include_relations)
+        if incols is not None:
+            cols = frozenset(incols)
+            rels = frozenset(inrels)
             relations &= (cols | rels)
-        elif self.exclude_columns is not None:
-            relations -= frozenset(self.exclude_columns)
+        elif excols is not None:
+            relations -= frozenset(excols)
         deep = dict((r, {}) for r in relations)
 
         # for security purposes, don't transmit list as top-level JSON
         if isinstance(result, Query):
-            result = self._paginated(result, deep)
+            result = self._paginated(result, deep, include_columns=incols)
             # Create the Link header.
             #
             # TODO We are already calling self._compute_results_per_page() once
@@ -1018,10 +1036,10 @@ class API(ModelView):
             headers = dict(Link=linkstring)
         else:
             primary_key = primary_key_name(result)
-            result = to_dict(result, deep, exclude=self.exclude_columns,
-                             exclude_relations=self.exclude_relations,
-                             include=self.include_columns,
-                             include_relations=self.include_relations,
+            result = to_dict(result, deep, exclude=excols,
+                             exclude_relations=exrels,
+                             include=incols,
+                             include_relations=inrels,
                              include_methods=self.include_methods)
             # The URL at which a client can access the instance matching this
             # search query.
@@ -1052,7 +1070,11 @@ class API(ModelView):
 
         """
         if instid is None:
-            return self._search()
+            requested_columns = request.args.get('cols')
+            columns = None
+            if requested_columns is not None:
+                columns = requested_columns.split(',')
+            return self._search(include_columns=columns)
         for preprocessor in self.preprocessors['GET_SINGLE']:
             preprocessor(instance_id=instid)
         # get the instance of the "main" model whose ID is instid
@@ -1062,7 +1084,11 @@ class API(ModelView):
         # If no relation is requested, just return the instance. Otherwise,
         # get the value of the relation specified by `relationname`.
         if relationname is None:
-            result = self._inst_to_dict(instance)
+            requested_columns = request.args.get('cols')
+            columns = None
+            if requested_columns is not None:
+                columns = requested_columns.split(',')
+            result = self._inst_to_dict(instance, include_columns=columns)
         else:
             related_value = getattr(instance, relationname)
             # create a placeholder for the relations of the returned models
