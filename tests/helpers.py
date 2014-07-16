@@ -10,6 +10,7 @@
 """
 import datetime
 import uuid
+import types
 
 from flask import Flask
 from nose import SkipTest
@@ -50,15 +51,19 @@ def skip_unless(condition, reason=None):
     def skip(test):
         message = 'Skipped {0}: {1}'.format(test.__name__, reason)
 
-        # TODO Since we don't check the case in which `test` is a class, the
-        # result of running the tests will be a single skipped test, although
-        # it should show one skip for each test method within the class.
-        def inner(*args, **kw):
-            if not condition:
-                raise SkipTest(message)
-            return test(*args, **kw)
-        inner.__name__ = test.__name__
-        return inner
+        if isinstance(test, (types.TypeType, types.ClassType)):
+            for attr, val in test.__dict__.iteritems():
+                if callable(val) and not attr.startswith("__"):
+                    setattr(test, attr, skip(val))
+            return test
+        else:
+            def inner(*args, **kw):
+                if not condition:
+                    raise SkipTest(message)
+                return test(*args, **kw)
+            inner.__name__ = test.__name__
+            return inner
+
     return skip
 
 
