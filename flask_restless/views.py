@@ -980,7 +980,7 @@ class API(ModelView):
             return dict(message='Unable to decode data'), 400
 
         for preprocessor in self.preprocessors['GET_MANY']:
-            preprocessor(search_params=search_params)
+            preprocessor(search_params=search_params, request=request)
 
         # perform a filtered search
         try:
