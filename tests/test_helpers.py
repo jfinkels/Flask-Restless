@@ -119,7 +119,9 @@ class TestModelHelpers(TestSupport):
         """
         person = self.Person(birth_date=date(1986, 9, 15))
         self.session.commit()
-        d = to_dict(person)
+        d = to_dict(person, formatters={
+            date: lambda x: x.isoformat()
+        })
         assert 'birth_date' in d
         assert d['birth_date'] == person.birth_date.isoformat()
 
@@ -130,7 +132,9 @@ class TestModelHelpers(TestSupport):
         """
         computer = self.Computer(buy_date=datetime.now())
         self.session.commit()
-        d = to_dict(computer)
+        d = to_dict(computer, formatters={
+            datetime: lambda x: x.isoformat()
+        })
         assert 'buy_date' in d
         assert d['buy_date'] == computer.buy_date.isoformat()
 
@@ -139,7 +143,9 @@ class TestModelHelpers(TestSupport):
         exampleuuid = uuid.uuid1()
         vehicle = self.Vehicle(uuid=exampleuuid)
         self.session.commit()
-        d = to_dict(vehicle)
+        d = to_dict(vehicle, formatters={
+            uuid.UUID: lambda x: str(x)
+        })
         assert 'uuid' in d
         assert str(exampleuuid) == d['uuid']
 
@@ -151,7 +157,9 @@ class TestModelHelpers(TestSupport):
         me = self.Person(name=u'Lincoln', age=24, birth_date=date(1986, 9, 15))
         self.session.commit()
 
-        me_dict = to_dict(me)
+        me_dict = to_dict(me, formatters={
+            date: lambda x: x.isoformat()
+        })
         expectedfields = sorted(['birth_date', 'age', 'id', 'name',
                                  'other', 'is_minor'])
         assert sorted(me_dict) == expectedfields
@@ -203,7 +211,9 @@ class TestModelHelpers(TestSupport):
         self.session.commit()
 
         deep = {'computers': []}
-        computers = to_dict(someone, deep)['computers']
+        computers = to_dict(someone, deep, formatters={
+            datetime: lambda x: x.isoformat()
+        })['computers']
         assert len(computers) == 1
         assert computers[0]['name'] == u'lixeiro'
         assert computers[0]['vendor'] == u'Lemote'

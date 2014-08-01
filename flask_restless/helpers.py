@@ -30,6 +30,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import _BinaryExpression
 from sqlalchemy.sql.expression import ColumnElement
 from sqlalchemy.inspection import inspect as sqlalchemy_inspect
+from .extensions import DATE_FORMAT
 
 #: Names of attributes which should definitely not be considered relations when
 #: dynamically computing a list of relations of a SQLAlchemy model.
@@ -257,7 +258,7 @@ def is_mapped_class(cls):
 # http://stackoverflow.com/q/1958219/108197.
 def to_dict(instance, deep=None, exclude=None, include=None,
             exclude_relations=None, include_relations=None,
-            include_methods=None):
+            include_methods=None, formatters=None):
     """Returns a dictionary representing the fields of the specified `instance`
     of a SQLAlchemy model.
 
@@ -329,12 +330,10 @@ def to_dict(instance, deep=None, exclude=None, include=None,
     # default. Convert datetime objects to ISO 8601 format, convert UUID
     # objects to hexadecimal strings, etc.
     for key, value in result.items():
-        if isinstance(value, (datetime.date, datetime.time)):
-            result[key] = value.isoformat()
-        elif isinstance(value, uuid.UUID):
-            result[key] = str(value)
+        if formatters != None and type(value) in formatters:
+            result[key] = formatters[type(value)](value)
         elif key not in column_attrs and is_mapped_class(type(value)):
-            result[key] = to_dict(value)
+            result[key] = to_dict(value, formatters=formatters)
     # recursively call _to_dict on each of the `deep` relations
     deep = deep or {}
     for relation, rdeep in deep.items():
@@ -361,7 +360,8 @@ def to_dict(instance, deep=None, exclude=None, include=None,
         if is_like_list(instance, relation):
             result[relation] = [to_dict(inst, rdeep, exclude=newexclude,
                                         include=newinclude,
-                                        include_methods=newmethods)
+                                        include_methods=newmethods,
+                                        formatters=formatters)
                                 for inst in relatedvalue]
             continue
         # If the related value is dynamically loaded, resolve the query to get
@@ -370,7 +370,8 @@ def to_dict(instance, deep=None, exclude=None, include=None,
             relatedvalue = relatedvalue.one()
         result[relation] = to_dict(relatedvalue, rdeep, exclude=newexclude,
                                    include=newinclude,
-                                   include_methods=newmethods)
+                                   include_methods=newmethods,
+                                   formatters=formatters)
     return result
 
 
