@@ -20,9 +20,9 @@ from sqlalchemy import or_ as OR
 from sqlalchemy.ext.associationproxy import AssociationProxy
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
-from .helpers import unicode_keys_to_strings
 from .helpers import session_query
 from .helpers import get_related_association_proxy_model
+from .helpers import primary_key_names
 
 
 def _sub_operator(model, argument, fieldname):
@@ -41,7 +41,7 @@ def _sub_operator(model, argument, fieldname):
     if isinstance(argument, dict):
         fieldname = argument['name']
         operator = argument['op']
-        argument = argument['val']
+        argument = argument.get('val')
         relation = None
         if '__' in fieldname:
             fieldname, relation = fieldname.split('__')
@@ -166,7 +166,7 @@ class Filter(object):
     def __repr__(self):
         """Returns a string representation of this object."""
         return '<Filter {0} {1} {2}>'.format(self.fieldname, self.operator,
-                                          self.argument or self.otherfield)
+                                             self.argument or self.otherfield)
 
     @staticmethod
     def from_dictionary(dictionary):
@@ -268,9 +268,7 @@ class SearchParameters(object):
         # for the sake of brevity...
         from_dict = Filter.from_dictionary
         filters = [from_dict(f) for f in dictionary.get('filters', [])]
-        # HACK In Python 2.5, unicode dictionary keys are not allowed.
         order_by_list = dictionary.get('order_by', [])
-        order_by_list = (unicode_keys_to_strings(o) for o in order_by_list)
         order_by = [OrderBy(**o) for o in order_by_list]
         limit = dictionary.get('limit')
         offset = dictionary.get('offset')
@@ -344,7 +342,9 @@ class QueryBuilder(object):
         if numargs == 1:
             return opfunc(field)
         if argument is None:
-            raise TypeError
+            msg = ('To compare a value to NULL, use the is_null/is_not_null '
+                   'operators.')
+            raise TypeError(msg)
         if numargs == 2:
             return opfunc(field, argument)
         return opfunc(field, argument, fieldname)
@@ -360,6 +360,9 @@ class QueryBuilder(object):
         Raises one of :exc:`AttributeError`, :exc:`KeyError`, or
         :exc:`TypeError` if there is a problem creating the query. See the
         documentation for :func:`_create_operation` for more information.
+
+        Pre-condition: the ``search_params.filters`` is a (possibly empty)
+        iterable.
 
         """
         filters = []
@@ -409,11 +412,17 @@ class QueryBuilder(object):
         filters = QueryBuilder._create_filters(model, search_params)
         query = query.filter(search_params.junction(*filters))
 
-        # Order the search
-        for val in search_params.order_by:
-            field = getattr(model, val.field)
-            direction = getattr(field, val.direction)
-            query = query.order_by(direction())
+        # Order the search. If no order field is specified in the search
+        # parameters, order by primary key.
+        if search_params.order_by:
+            for val in search_params.order_by:
+                field = getattr(model, val.field)
+                direction = getattr(field, val.direction)
+                query = query.order_by(direction())
+        else:
+            pks = primary_key_names(model)
+            pk_order = (getattr(model, field).asc() for field in pks)
+            query = query.order_by(*pk_order)
 
         # Limit it
         if search_params.limit:

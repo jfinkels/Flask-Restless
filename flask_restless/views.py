@@ -28,18 +28,23 @@ from functools import wraps
 import math
 import warnings
 
-from flask import abort
 from flask import current_app
 from flask import json
-from flask import jsonify
+from flask import jsonify as _jsonify
 from flask import request
 from flask.views import MethodView
+from mimerender import FlaskMimeRender
+from sqlalchemy.exc import DataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm.exc import MultipleResultsFound
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm.query import Query
+from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import HTTPException
 
+from .helpers import count
 from .helpers import evaluate_functions
 from .helpers import get_by
 from .helpers import get_columns
@@ -54,17 +59,24 @@ from .helpers import query_by_primary_key
 from .helpers import session_query
 from .helpers import strings_to_dates
 from .helpers import to_dict
-from .helpers import unicode_keys_to_strings
 from .helpers import upper_keys
 from .search import create_query
 from .search import search
 
 
 #: Format string for creating Link headers in paginated responses.
-LINKTEMPLATE = '<%s?page=%s&results_per_page=%s>; rel="%s"'
+LINKTEMPLATE = '<{0}?page={1}&results_per_page={2}>; rel="{3}"'
+
+#: String used internally as a dictionary key for passing header information
+#: from view functions to the :func:`jsonpify` function.
+_HEADERS = '__restless_headers'
+
+#: String used internally as a dictionary key for passing status code
+#: information from view functions to the :func:`jsonpify` function.
+_STATUS = '__restless_status_code'
 
 
-class ProcessingException(Exception):
+class ProcessingException(HTTPException):
     """Raised when a preprocessor or postprocessor encounters a problem.
 
     This exception should be raised by functions supplied in the
@@ -79,10 +91,23 @@ class ProcessingException(Exception):
     the JSON object in the body of the response to the client.
 
     """
-    def __init__(self, message='', status_code=400, *args, **kwargs):
+    def __init__(self, description='', code=400, *args, **kwargs):
         super(ProcessingException, self).__init__(*args, **kwargs)
-        self.message = message
-        self.status_code = status_code
+        self.code = code
+        self.description = description
+
+
+def _is_msie8or9():
+    """Returns ``True`` if and only if the user agent of the client making the
+    request indicates that it is Microsoft Internet Explorer 8 or 9.
+
+    """
+    if request.user_agent is None or request.user_agent.version is None:
+        return False
+    ua = request.user_agent
+    # request.user_agent.version comes as a string, so we have to parse it
+    ua_version = tuple(int(d) for d in ua.version.split('.'))
+    return ua.browser == 'msie' and (8, 0) <= ua_version < (10, 0)
 
 
 def create_link_string(page, last_page, per_page):
@@ -95,10 +120,10 @@ def create_link_string(page, last_page, per_page):
     linkstring = ''
     if page < last_page:
         next_page = page + 1
-        linkstring = LINKTEMPLATE % (request.base_url, next_page,
-                                     per_page, 'next') + ', '
-    linkstring += LINKTEMPLATE % (request.base_url, last_page,
-                                  per_page, 'last')
+        linkstring = LINKTEMPLATE.format(request.base_url, next_page,
+                                         per_page, 'next') + ', '
+    linkstring += LINKTEMPLATE.format(request.base_url, last_page,
+                                      per_page, 'last')
     return linkstring
 
 
@@ -111,10 +136,10 @@ def catch_processing_exceptions(func):
     def decorator(*args, **kw):
         try:
             return func(*args, **kw)
-        except ProcessingException, exception:
-            current_app.logger.exception(exception.message)
-            status, message = exception.status_code, exception.message
-            return jsonify_status_code(status_code=status, message=message)
+        except ProcessingException as exception:
+            current_app.logger.exception(str(exception))
+            status, message = exception.code, exception.description or str(exception)
+            return jsonify(message=message), status
     return decorator
 
 
@@ -126,26 +151,21 @@ def set_headers(response, headers):
     conflict with `headers` will be overwritten.
 
     """
-    for key, value in headers.iteritems():
+    for key, value in headers.items():
         response.headers[key] = value
 
 
-def jsonify_status_code(status_code, headers=None, *args, **kw):
-    """Returns a jsonified response with the specified HTTP status code.
+def jsonify(*args, **kw):
+    """Same as :func:`flask.jsonify`, but sets response headers.
 
-    If `headers` is specified, it must be a dictionary specifying headers to
-    set before sending the JSONified response to the client. Headers on the
-    response will be overwritten by headers specified in the `headers`
-    dictionary.
-
-    The remaining positional and keyword arguments are passed directly to the
-    :func:`flask.jsonify` function which creates the response.
+    If ``headers`` is a keyword argument, this function will construct the JSON
+    response via :func:`flask.jsonify`, then set the specified ``headers`` on
+    the response. ``headers`` must be a dictionary mapping strings to strings.
 
     """
-    response = jsonify(*args, **kw)
-    response.status_code = status_code
-    if headers:
-        set_headers(response, headers)
+    response = _jsonify(*args, **kw)
+    if 'headers' in kw:
+        set_headers(response, kw['headers'])
     return response
 
 
@@ -205,31 +225,46 @@ def _headers_to_json(headers):
 
 
 def jsonpify(*args, **kw):
-    """Passes the specified arguments directly to :func:`jsonify_status_code`
-    with a status code of 200, then wraps the response with the name of a
-    JSON-P callback function specified as a query parameter called
-    ``'callback'`` (or does nothing if no such callback function is specified
-    in the request).
+    """Passes the specified arguments directly to :func:`jsonify` with a status
+    code of 200, then wraps the response with the name of a JSON-P callback
+    function specified as a query parameter called ``'callback'`` (or does
+    nothing if no such callback function is specified in the request).
 
-    If `headers` is specified, it must be a dictionary specifying headers to
-    set before sending the JSONified response to the client. Headers on the
-    response will be overwritten by headers specified in the `headers`
-    dictionary.
+    If the keyword arguments include the string specified by :data:`_HEADERS`,
+    its value must be a dictionary specifying headers to set before sending the
+    JSONified response to the client. Headers on the response will be
+    overwritten by headers specified in this dictionary.
+
+    If the keyword arguments include the string specified by :data:`_STATUS`,
+    its value must be an integer representing the status code of the response.
+    Otherwise, the status code of the response will be :http:status:`200`.
 
     """
-    headers = kw.pop('headers', None)
+    # HACK In order to make the headers and status code available in the
+    # content of the response, we need to send it from the view function to
+    # this jsonpify function via its keyword arguments. This is a limitation of
+    # the mimerender library: it has no way of making the headers and status
+    # code known to the rendering functions.
+    headers = kw.pop(_HEADERS, {})
+    status_code = kw.pop(_STATUS, 200)
     response = jsonify(*args, **kw)
     callback = request.args.get('callback', False)
     if callback:
         # Reload the data from the constructed JSON string so we can wrap it in
         # a JSONP function.
         data = json.loads(response.data)
-        # Add the headers as metadata to the JSONP response.
+        # Force the 'Content-Type' header to be 'application/javascript'.
+        #
+        # Note that this is different from the mimetype used in Flask for JSON
+        # responses; Flask uses 'application/json'. We use
+        # 'application/javascript' because a JSONP response is valid
+        # Javascript, but not valid JSON.
+        headers['Content-Type'] = 'application/javascript'
+        # Add the headers and status code as metadata to the JSONP response.
         meta = _headers_to_json(headers) if headers is not None else {}
-        # TODO add a jsonpify_status_code function?
-        meta['status'] = 200
+        meta['status'] = status_code
         inner = json.dumps(dict(meta=meta, data=data))
-        content = '%s( %s)' % (callback, inner)
+        content = '{0}({1})'.format(callback, inner)
         # Note that this is different from the mimetype used in Flask for JSON
         # responses; Flask uses 'application/json'. We use
         # 'application/javascript' because a JSONP response is not valid JSON.
@@ -238,6 +273,7 @@ def jsonpify(*args, **kw):
     # Set the headers on the HTTP response as well.
     if headers:
         set_headers(response, headers)
+    response.status_code = status_code
     return response
 
 
@@ -302,6 +338,17 @@ def _parse_excludes(column_names):
             del relations[column]
     return columns, relations
 
+#: Creates the mimerender object necessary for decorating responses with a
+#: function that automatically formats the dictionary in the appropriate format
+#: based on the ``Accept`` header.
+#:
+#: Technical details: the first pair of parantheses instantiates the
+#: :class:`mimerender.FlaskMimeRender` class. The second pair of parentheses
+#: creates the decorator, so that we can simply use the variable ``mimerender``
+#: as a decorator.
+# TODO fill in xml renderer
+mimerender = FlaskMimeRender()(default='json', json=jsonpify)
+
 
 class ModelView(MethodView):
     """Base class for :class:`flask.MethodView` classes which represent a view
@@ -318,6 +365,9 @@ class ModelView(MethodView):
     query object, depending on how the model has been defined.
 
     """
+
+    #: List of decorators applied to every method of this class.
+    decorators = [mimerender]
 
     def __init__(self, session, model, *args, **kw):
         """Calls the constructor of the superclass and specifies the model for
@@ -360,25 +410,28 @@ class FunctionAPI(ModelView):
         :ref:`functionevaluation`.
 
         """
+        if 'q' not in request.args or not request.args.get('q'):
+            return dict(message='Empty query parameter'), 400
+        # if parsing JSON fails, return a 400 error in JSON format
         try:
-            data = json.loads(request.args.get('q')) or {}
-        except (TypeError, ValueError, OverflowError), exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message='Unable to decode data')
+            data = json.loads(str(request.args.get('q'))) or {}
+        except (TypeError, ValueError, OverflowError) as exception:
+            current_app.logger.exception(str(exception))
+            return dict(message='Unable to decode data'), 400
         try:
             result = evaluate_functions(self.session, self.model,
-                                        data.get('functions'))
+                                        data.get('functions', []))
             if not result:
-                return jsonify_status_code(204)
-            return jsonpify(result)
-        except AttributeError, exception:
-            current_app.logger.exception(exception.message)
-            message = 'No such field "%s"' % exception.field
-            return jsonify_status_code(400, message=message)
-        except OperationalError, exception:
-            current_app.logger.exception(exception.message)
-            message = 'No such function "%s"' % exception.function
-            return jsonify_status_code(400, message=message)
+                return {}, 204
+            return result
+        except AttributeError as exception:
+            current_app.logger.exception(str(exception))
+            message = 'No such field "{0}"'.format(exception.field)
+            return dict(message=message), 400
+        except OperationalError as exception:
+            current_app.logger.exception(str(exception))
+            message = 'No such function "{0}"'.format(exception.function)
+            return dict(message=message), 400
 
 
 class API(ModelView):
@@ -390,13 +443,14 @@ class API(ModelView):
     """
 
     #: List of decorators applied to every method of this class.
-    decorators = [catch_processing_exceptions]
+    decorators = ModelView.decorators + [catch_processing_exceptions]
 
     def __init__(self, session, model, exclude_columns=None,
                  include_columns=None, include_methods=None,
                  validation_exceptions=None, results_per_page=10,
                  max_results_per_page=100, post_form_preprocessor=None,
-                 preprocessors=None, postprocessors=None, *args, **kw):
+                 preprocessors=None, postprocessors=None, primary_key=None,
+                 *args, **kw):
         """Instantiates this view with the specified attributes.
 
         `session` is the SQLAlchemy session in which all database transactions
@@ -476,6 +530,15 @@ class API(ModelView):
         other code. For more information on preprocessors and postprocessors,
         see :ref:`processors`.
 
+        `primary_key` is a string specifying the name of the column of `model`
+        to use as the primary key for the purposes of creating URLs. If the
+        `model` has exactly one primary key, there is no need to provide a
+        value for this. If `model` has two or more primary keys, you must
+        specify which one to use.
+
+        .. versionadded:: 0.13.0
+           Added the `primary_key` keyword argument.
+
         .. versionadded:: 0.10.2
            Added the `include_methods` keyword argument.
 
@@ -516,6 +579,7 @@ class API(ModelView):
         self.validation_exceptions = tuple(validation_exceptions or ())
         self.results_per_page = results_per_page
         self.max_results_per_page = max_results_per_page
+        self.primary_key = primary_key
         self.postprocessors = defaultdict(list)
         self.preprocessors = defaultdict(list)
         self.postprocessors.update(upper_keys(postprocessors or {}))
@@ -567,8 +631,8 @@ class API(ModelView):
             try:
                 for instance in query:
                     getattr(instance, relationname).append(subinst)
-            except AttributeError, exception:
-                current_app.logger.exception(exception.message)
+            except AttributeError as exception:
+                current_app.logger.exception(str(exception))
                 setattr(instance, relationname, subinst)
 
     def _remove_from_relation(self, query, relationname, toremove=None):
@@ -603,8 +667,7 @@ class API(ModelView):
             if 'id' in dictionary:
                 subinst = get_by(self.session, submodel, dictionary['id'])
             else:
-                kw = unicode_keys_to_strings(dictionary)
-                subinst = self.query(submodel).filter_by(**kw).first()
+                subinst = self.query(submodel).filter_by(**dictionary).first()
             for instance in query:
                 getattr(instance, relationname).remove(subinst)
             if remove:
@@ -682,8 +745,8 @@ class API(ModelView):
         tochange = frozenset(relations) & frozenset(params)
         for columnname in tochange:
             # Check if 'add' or 'remove' is being used
-            if (isinstance(params[columnname], dict) and
-                any(k in params[columnname] for k in ['add', 'remove'])):
+            if (isinstance(params[columnname], dict)
+                and any(k in params[columnname] for k in ['add', 'remove'])):
 
                 toadd = params[columnname].get('add', [])
                 toremove = params[columnname].get('remove', [])
@@ -708,7 +771,7 @@ class API(ModelView):
         self.session.rollback()
         errors = self._extract_error_messages(exception) or \
             'Could not determine specific validation errors'
-        return jsonify_status_code(400, validation_errors=errors)
+        return dict(validation_errors=errors), 400
 
     def _extract_error_messages(self, exception):
         """Tries to extract a dictionary mapping field name to validation error
@@ -730,11 +793,11 @@ class API(ModelView):
         if hasattr(exception, 'message'):
             # TODO this works only if there is one validation error
             try:
-                left, right = exception.message.rsplit(':', 1)
+                left, right = str(exception).rsplit(':', 1)
                 left_bracket = left.rindex('[')
                 right_bracket = right.rindex(']')
-            except ValueError, exception:
-                current_app.logger.exception(exception.message)
+            except ValueError as exception:
+                current_app.logger.exception(str(exception))
                 # could not parse the string; we're not trying too hard here...
                 return None
             msg = right[:right_bracket].strip(' "')
@@ -762,7 +825,8 @@ class API(ModelView):
         """Returns a paginated JSONified response from the specified list of
         model instances.
 
-        `instances` is a list of model instances.
+        `instances` is either a Python list of model instances or a
+        :class:`~sqlalchemy.orm.Query`.
 
         `deep` is the dictionary which defines the depth of submodels to output
         in the JSON format of the model instances in `instances`; it is passed
@@ -780,10 +844,10 @@ class API(ModelView):
            }
 
         """
-        if type(instances) == list:
+        if isinstance(instances, list):
             num_results = len(instances)
         else:
-            num_results = instances.count()
+            num_results = count(self.session, instances)
         results_per_page = self._compute_results_per_page()
         if results_per_page > 0:
             # get the page number (first page is page 1)
@@ -836,9 +900,9 @@ class API(ModelView):
         :http:statuscode:`404`.
 
         """
-        inst = get_by(self.session, self.model, instid)
+        inst = get_by(self.session, self.model, instid, self.primary_key)
         if inst is None:
-            abort(404)
+            return {_STATUS: 404}, 404
         return self._inst_to_dict(inst)
 
     def _search(self):
@@ -911,9 +975,9 @@ class API(ModelView):
         # try to get search query from the request query parameters
         try:
             search_params = json.loads(request.args.get('q', '{}'))
-        except (TypeError, ValueError, OverflowError), exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message='Unable to decode data')
+        except (TypeError, ValueError, OverflowError) as exception:
+            current_app.logger.exception(str(exception))
+            return dict(message='Unable to decode data'), 400
 
         for preprocessor in self.preprocessors['GET_MANY']:
             preprocessor(search_params=search_params)
@@ -922,13 +986,12 @@ class API(ModelView):
         try:
             result = search(self.session, self.model, search_params)
         except NoResultFound:
-            return jsonify_status_code(400, message='No result found')
+            return dict(message='No result found'), 404
         except MultipleResultsFound:
-            return jsonify_status_code(400, message='Multiple results found')
-        except Exception, exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400,
-                                       message='Unable to construct query')
+            return dict(message='Multiple results found'), 400
+        except Exception as exception:
+            current_app.logger.exception(str(exception))
+            return dict(message='Unable to construct query'), 400
 
         # create a placeholder for the relations of the returned models
         relations = frozenset(get_relations(self.model))
@@ -961,13 +1024,17 @@ class API(ModelView):
                              include_methods=self.include_methods)
             # The URL at which a client can access the instance matching this
             # search query.
-            url = '%s/%s' % (request.base_url, result[primary_key])
+            url = '{0}/{1}'.format(request.base_url, result[primary_key])
             headers = dict(Location=url)
 
         for postprocessor in self.postprocessors['GET_MANY']:
-            postprocessor(result=result)
+            postprocessor(result=result, search_params=search_params)
 
-        return jsonpify(result, headers=headers)
+        # HACK Provide the headers directly in the result dictionary, so that
+        # the :func:`jsonpify` function has access to them. See the note there
+        # for more information.
+        result[_HEADERS] = headers
+        return result, 200, headers
 
     def get(self, instid, relationname, relationinstid):
         """Returns a JSON representation of an instance of model with the
@@ -988,9 +1055,9 @@ class API(ModelView):
         for preprocessor in self.preprocessors['GET_SINGLE']:
             preprocessor(instance_id=instid)
         # get the instance of the "main" model whose ID is instid
-        instance = get_by(self.session, self.model, instid)
+        instance = get_by(self.session, self.model, instid, self.primary_key)
         if instance is None:
-            abort(404)
+            return {_STATUS: 404}, 404
         # If no relation is requested, just return the instance. Otherwise,
         # get the value of the relation specified by `relationname`.
         if relationname is None:
@@ -1001,22 +1068,33 @@ class API(ModelView):
             related_model = get_related_model(self.model, relationname)
             relations = frozenset(get_relations(related_model))
             deep = dict((r, {}) for r in relations)
-            # for security purposes, don't transmit list as top-level JSON
-            if is_like_list(instance, relationname):
-                result = self._paginated(list(related_value), deep)
+            if relationinstid is not None:
+                related_value_instance = get_by(self.session, related_model,
+                                                relationinstid)
+                if related_value_instance is None:
+                    return {_STATUS: 404}, 404
+                result = to_dict(related_value_instance, deep)
             else:
-                result = to_dict(related_value, deep)
+                # for security purposes, don't transmit list as top-level JSON
+                if is_like_list(instance, relationname):
+                    result = self._paginated(list(related_value), deep)
+                else:
+                    result = to_dict(related_value, deep)
+        if result is None:
+            return {_STATUS: 404}, 404
         for postprocessor in self.postprocessors['GET_SINGLE']:
             postprocessor(result=result)
-        return jsonpify(result)
+        return result
 
     def delete(self, instid, relationname, relationinstid):
         """Removes the specified instance of the model with the specified name
         from the database.
 
-        Since :http:method:`delete` is an idempotent method according to the
-        :rfc:`2616`, this method responds with :http:status:`204` regardless of
-        whether an object was deleted.
+        Although :http:method:`delete` is an idempotent method according to
+        :rfc:`2616`, idempotency only means that subsequent identical requests
+        cannot have additional side-effects. Since the response code is not a
+        side effect, this method responds with :http:status:`204` only if an
+        object is deleted, and with :http:status:`404` when nothing is deleted.
 
         If `relationname
 
@@ -1031,12 +1109,13 @@ class API(ModelView):
         for preprocessor in self.preprocessors['DELETE']:
             preprocessor(instance_id=instid, relation_name=relationname,
                          relation_instance_id=relationinstid)
-        inst = get_by(self.session, self.model, instid)
+        inst = get_by(self.session, self.model, instid, self.primary_key)
         if relationname:
             # If the request is ``DELETE /api/person/1/computers``, error 400.
             if not relationinstid:
-                msg = 'Cannot DELETE entire "%s" relation' % relationname
-                return jsonify_status_code(400, msg)
+                msg = ('Cannot DELETE entire "{0}"'
+                       ' relation').format(relationname)
+                return dict(message=msg), 400
             # Otherwise, get the related instance to delete.
             relation = getattr(inst, relationname)
             related_model = get_related_model(self.model, relationname)
@@ -1044,13 +1123,14 @@ class API(ModelView):
                                        relationinstid)
             # Removes an object from the relation list.
             relation.remove(relation_instance)
+            is_deleted = len(self.session.dirty) > 0
         elif inst is not None:
             self.session.delete(inst)
-            self.session.commit()
-            is_deleted = True
+            is_deleted = len(self.session.deleted) > 0
+        self.session.commit()
         for postprocessor in self.postprocessors['DELETE']:
             postprocessor(is_deleted=is_deleted)
-        return jsonify_status_code(204)
+        return {}, 204 if is_deleted else 404
 
     def post(self):
         """Creates a new instance of a given model based on request data.
@@ -1073,27 +1153,38 @@ class API(ModelView):
 
         """
         content_type = request.headers.get('Content-Type', None)
-        if not content_type.startswith('application/json'):
+        content_is_json = content_type.startswith('application/json')
+        is_msie = _is_msie8or9()
+        # Request must have the Content-Type: application/json header, unless
+        # the User-Agent string indicates that the client is Microsoft Internet
+        # Explorer 8 or 9 (which has a fixed Content-Type of 'text/html'; see
+        # issue #267).
+        if not is_msie and not content_is_json:
             msg = 'Request must have "Content-Type: application/json" header'
-            return jsonify_status_code(415, message=msg)
+            return dict(message=msg), 415
 
         # try to read the parameters for the model from the body of the request
         try:
-            params = json.loads(request.data)
-        except (TypeError, ValueError, OverflowError), exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message='Unable to decode data')
+            # HACK Requests made from Internet Explorer 8 or 9 don't have the
+            # correct content type, so request.get_json() doesn't work.
+            if is_msie:
+                data = json.loads(request.get_data()) or {}
+            else:
+                data = request.get_json() or {}
+        except (BadRequest, TypeError, ValueError, OverflowError) as exception:
+            current_app.logger.exception(str(exception))
+            return dict(message='Unable to decode data'), 400
 
         # apply any preprocessors to the POST arguments
         for preprocessor in self.preprocessors['POST']:
-            preprocessor(data=params)
+            preprocessor(data=data)
 
         # Check for any request parameter naming a column which does not exist
         # on the current model.
-        for field in params:
+        for field in data:
             if not has_field(self.model, field):
-                msg = "Model does not have field '%s'" % field
-                return jsonify_status_code(400, message=msg)
+                msg = "Model does not have field '{0}'".format(field)
+                return dict(message=msg), 400
 
         # Getting the list of relations that will be added later
         cols = get_columns(self.model)
@@ -1101,56 +1192,62 @@ class API(ModelView):
 
         # Looking for what we're going to set on the model right now
         colkeys = cols.keys()
-        paramkeys = params.keys()
+        paramkeys = data.keys()
         props = set(colkeys).intersection(paramkeys).difference(relations)
 
         # Special case: if there are any dates, convert the string form of the
         # date into an instance of the Python ``datetime`` object.
-        params = strings_to_dates(self.model, params)
+        data = strings_to_dates(self.model, data)
 
         try:
             # Instantiate the model with the parameters.
-            modelargs = dict([(i, params[i]) for i in props])
-            # HACK Python 2.5 requires __init__() keywords to be strings.
-            instance = self.model(**unicode_keys_to_strings(modelargs))
+            modelargs = dict([(i, data[i]) for i in props])
+            instance = self.model(**modelargs)
 
             # Handling relations, a single level is allowed
             for col in set(relations).intersection(paramkeys):
                 submodel = get_related_model(self.model, col)
 
-                if type(params[col]) == list:
+                if type(data[col]) == list:
                     # model has several related objects
-                    for subparams in params[col]:
+                    for subparams in data[col]:
                         subinst = get_or_create(self.session, submodel,
                                                 subparams)
-                        getattr(instance, col).append(subinst)
+                        try:
+                            getattr(instance, col).append(subinst)
+                        except AttributeError:
+                            attribute = getattr(instance, col)
+                            attribute[subinst.key] = subinst.value
                 else:
                     # model has single related object
                     subinst = get_or_create(self.session, submodel,
-                                            params[col])
+                                            data[col])
                     setattr(instance, col, subinst)
 
             # add the created model to the session
             self.session.add(instance)
             self.session.commit()
             result = self._inst_to_dict(instance)
-            primary_key = str(result[primary_key_name(instance)])
 
-            for postprocessor in self.postprocessors['POST']:
-                postprocessor(result=result)
+            primary_key = str(result[primary_key_name(instance)])
 
             # The URL at which a client can access the newly created instance
             # of the model.
 
-            url = '%s/%s' % (request.base_url, primary_key)
+            url = '{0}/{1}'.format(request.base_url, primary_key)
             # Provide that URL in the Location header in the response.
             headers = dict(Location=url)
-            return jsonify_status_code(201, headers=headers, **result)
-        except self.validation_exceptions, exception:
+
+            for postprocessor in self.postprocessors['POST']:
+                postprocessor(result=result)
+
+            return result, 201, headers
+        except self.validation_exceptions as exception:
             return self._handle_validation_exception(exception)
-        except IntegrityError, exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message=exception.message)
+        except (DataError, IntegrityError, ProgrammingError) as exception:
+            self.session.rollback()
+            current_app.logger.exception(str(exception))
+            return dict(message=str(exception)), 400
 
     def patch(self, instid, relationname, relationinstid):
         """Updates the instance specified by ``instid`` of the named model, or
@@ -1178,17 +1275,29 @@ class API(ModelView):
 
         """
         content_type = request.headers.get('Content-Type', None)
-        if not content_type.startswith('application/json'):
+        content_is_json = content_type.startswith('application/json')
+        is_msie = _is_msie8or9()
+        # Request must have the Content-Type: application/json header, unless
+        # the User-Agent string indicates that the client is Microsoft Internet
+        # Explorer 8 or 9 (which has a fixed Content-Type of 'text/html'; see
+        # issue #267).
+        if not is_msie and not content_is_json:
             msg = 'Request must have "Content-Type: application/json" header'
-            return jsonify_status_code(415, message=msg)
+            return dict(message=msg), 415
 
         # try to load the fields/values to update from the body of the request
         try:
-            data = json.loads(request.data)
-        except (TypeError, ValueError, OverflowError), exception:
+            # HACK Requests made from Internet Explorer 8 or 9 don't have the
+            # correct content type, so request.get_json() doesn't work.
+            if is_msie:
+                data = json.loads(request.get_data()) or {}
+            else:
+                data = request.get_json() or {}
+        except (BadRequest, TypeError, ValueError, OverflowError) as exception:
             # this also happens when request.data is empty
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message='Unable to decode data')
+            current_app.logger.exception(str(exception))
+            return dict(message='Unable to decode data'), 400
+
         # Check if the request is to patch many instances of the current model.
         patchmany = instid is None
         # Perform any necessary preprocessing.
@@ -1206,35 +1315,28 @@ class API(ModelView):
         # on the current model.
         for field in data:
             if not has_field(self.model, field):
-                msg = "Model does not have field '%s'" % field
-                return jsonify_status_code(400, message=msg)
+                msg = "Model does not have field '{0}'".format(field)
+                return dict(message=msg), 400
 
         if patchmany:
             try:
                 # create a SQLALchemy Query from the query parameter `q`
                 query = create_query(self.session, self.model, search_params)
-            except Exception, exception:
-                current_app.logger.exception(exception.message)
-                return jsonify_status_code(400,
-                                           message='Unable to construct query')
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                return dict(message='Unable to construct query'), 400
         else:
             # create a SQLAlchemy Query which has exactly the specified row
             query = query_by_primary_key(self.session, self.model, instid)
             if query.count() == 0:
-                abort(404)
+                return {_STATUS: 404}, 404
             assert query.count() == 1, 'Multiple rows with same ID'
 
         try:
-            # when update relations of current model
-            # if there is an column that is not specified in the relationship
-            # server crash but should have given a note down to the client
-            # as it was nice done to the same situation that might
-            # occur to current model
             relations = self._update_relations(query, data)
-        except TypeError, exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message=exception.message)
-
+        except self.validation_exceptions as exception:
+            current_app.logger.exception(str(exception))
+            return self._handle_validation_exception(exception)
         field_list = frozenset(data) ^ relations
         data = dict((field, data[field]) for field in field_list)
 
@@ -1247,28 +1349,29 @@ class API(ModelView):
             num_modified = 0
             if data:
                 for item in query.all():
-                    for field, value in data.iteritems():
+                    for field, value in data.items():
                         setattr(item, field, value)
                     num_modified += 1
             self.session.commit()
-        except self.validation_exceptions, exception:
-            current_app.logger.exception(exception.message)
+        except self.validation_exceptions as exception:
+            current_app.logger.exception(str(exception))
             return self._handle_validation_exception(exception)
-        except IntegrityError, exception:
-            current_app.logger.exception(exception.message)
-            return jsonify_status_code(400, message=exception.message)
+        except (DataError, IntegrityError, ProgrammingError) as exception:
+            current_app.logger.exception(str(exception))
+            return dict(message=str(exception)), 400
 
         # Perform any necessary postprocessing.
         if patchmany:
             result = dict(num_modified=num_modified)
             for postprocessor in self.postprocessors['PATCH_MANY']:
-                postprocessor(query=query, result=result)
+                postprocessor(query=query, result=result,
+                              search_params=search_params)
         else:
             result = self._instid_to_dict(instid)
             for postprocessor in self.postprocessors['PATCH_SINGLE']:
                 postprocessor(result=result)
 
-        return jsonify(result)
+        return result
 
     def put(self, *args, **kw):
         """Alias for :meth:`patch`."""

@@ -11,6 +11,7 @@
 """
 from datetime import date
 from datetime import datetime
+from datetime import timedelta
 
 import dateutil
 from flask import json
@@ -23,11 +24,13 @@ else:
 from sqlalchemy import Column
 from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
+from sqlalchemy import String
 from sqlalchemy import Table
 from sqlalchemy import Unicode
 from sqlalchemy.ext.associationproxy import association_proxy as prox
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship as rel
+from sqlalchemy.orm.collections import column_mapped_collection as col_mapped
 
 from flask.ext.restless.helpers import to_dict
 from flask.ext.restless.manager import APIManager
@@ -43,6 +46,18 @@ dumps = json.dumps
 loads = json.loads
 
 
+#: The User-Agent string for Microsoft Internet Explorer 8.
+#:
+#: From <http://blogs.msdn.com/b/ie/archive/2008/02/21/the-internet-explorer-8-user-agent-string.aspx>.
+MSIE8_UA = 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0)'
+
+#: The User-Agent string for Microsoft Internet Explorer 9.
+#:
+#: From <http://blogs.msdn.com/b/ie/archive/2010/03/23/introducing-ie9-s-user-agent-string.aspx>.
+MSIE9_UA = 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)'
+
+
+@skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
 class TestFSAModel(FlaskTestBase):
     """Tests for functions which operate on Flask-SQLAlchemy models."""
 
@@ -107,12 +122,13 @@ class TestFSAModel(FlaskTestBase):
         owner = self.User()
         pet1 = self.Pet()
         pet2 = self.Pet()
+        pet3 = self.Pet()
         pet1.owner = owner
         pet2.owner = owner
-        self.db.session.add_all([owner, pet1, pet2])
+        self.db.session.add_all([owner, pet1, pet2, pet3])
         self.db.session.commit()
 
-        response = self.app.get('/api/user/%d' % owner.id)
+        response = self.app.get('/api/user/{0:d}'.format(owner.id))
         assert 200 == response.status_code
         data = loads(response.data)
         assert 2 == len(data['pets'])
@@ -134,7 +150,7 @@ class TestFSAModel(FlaskTestBase):
         self.db.session.add_all([owner, pet1, pet2])
         self.db.session.commit()
 
-        response = self.app.get('/api/lazy_user/%d' % owner.id)
+        response = self.app.get('/api/lazy_user/{0:d}'.format(owner.id))
         assert 200 == response.status_code
         data = loads(response.data)
         assert 2 == len(data['pets'])
@@ -147,11 +163,14 @@ class TestFSAModel(FlaskTestBase):
         assert not isinstance(data['owner'], list)
         assert owner.id == data['ownerid']
 
-
-# skip_unless should be used as a decorator, but Python 2.5 doesn't have
-# decorators.
-TestFSAModel = skip_unless(has_flask_sqlalchemy,
-                           'Flask-SQLAlchemy not found.')(TestFSAModel)
+        # Check that it's possible to get owner if not null
+        response = self.app.get('/api/pet/1/owner')
+        assert 200 == response.status_code
+        data = loads(response.data)
+        assert 2 == len(data['pets'])
+        # And that we get a 404 if owner is null
+        response = self.app.get('/api/pet/3/owner')
+        assert 404 == response.status_code
 
 
 class TestFunctionAPI(TestSupportPrefilled):
@@ -176,7 +195,7 @@ class TestFunctionAPI(TestSupportPrefilled):
                      {'name': 'avg', 'field': 'other'},
                      {'name': 'count', 'field': 'id'}]
         query = dumps(dict(functions=functions))
-        response = self.app.get('/api/eval/person?q=%s' % query)
+        response = self.app.get('/api/eval/person?q={0}'.format(query))
         assert response.status_code == 200
         data = loads(response.data)
         assert 'sum__age' in data
@@ -199,7 +218,7 @@ class TestFunctionAPI(TestSupportPrefilled):
         assert response.status_code == 400
 
         # if we provide no functions, then we expect an empty response
-        response = self.app.get('/api/eval/person?q=%s' % dumps(dict()))
+        response = self.app.get('/api/eval/person?q={0}'.format(dumps(dict())))
         assert response.status_code == 204
 
     def test_poorly_defined_functions(self):
@@ -209,14 +228,14 @@ class TestFunctionAPI(TestSupportPrefilled):
         """
         # test for bad field name
         search = {'functions': [{'name': 'sum', 'field': 'bogusfieldname'}]}
-        resp = self.app.get('/api/eval/person?q=%s' % dumps(search))
+        resp = self.app.get('/api/eval/person?q={0}'.format(dumps(search)))
         assert resp.status_code == 400
         assert 'message' in loads(resp.data)
         assert 'bogusfieldname' in loads(resp.data)['message']
 
         # test for bad function name
         search = {'functions': [{'name': 'bogusfuncname', 'field': 'age'}]}
-        resp = self.app.get('/api/eval/person?q=%s' % dumps(search))
+        resp = self.app.get('/api/eval/person?q={0}'.format(dumps(search)))
         assert resp.status_code == 400
         assert 'message' in loads(resp.data)
         assert 'bogusfuncname' in loads(resp.data)['message']
@@ -232,19 +251,21 @@ class TestFunctionAPI(TestSupportPrefilled):
         query = dumps(dict(functions=functions))
         # JSONP should work on function evaluation endpoints as well as on
         # normal GET endpoints.
-        response = self.app.get('/api/eval/person?q=%s&callback=baz' % query)
+        response = self.app.get('/api/eval/person?'
+                                'q={0}&callback=baz'.format(query))
         assert response.status_code == 200
-        assert response.data.startswith('baz(')
-        assert response.data.endswith(')')
+        assert response.mimetype == 'application/javascript'
+        assert response.data.startswith(b'baz(')
+        assert response.data.endswith(b')')
 
         # Add some more people so the result will be paginated.
         for n in range(20):
-            self.session.add(self.Person(name=str(n)))
+            self.session.add(self.Person(name=u'{0}'.format(n)))
         self.session.commit()
         response = self.app.get('/api/person?callback=baz')
         assert response.status_code == 200
-        assert response.data.startswith('baz(')
-        assert response.data.endswith(')')
+        assert response.data.startswith(b'baz(')
+        assert response.data.endswith(b')')
         # Get the dictionary representation of the JSON string inside the
         # 'baz()' part of the JSONP response.
         data = loads(response.data[4:-1])
@@ -288,7 +309,7 @@ class TestAPI(TestSupport):
                                 methods=['GET', 'PATCH', 'POST', 'DELETE'])
 
         # to facilitate searching
-        self.app.search = lambda url, q: self.app.get(url + '?q=%s' % q)
+        self.app.search = lambda url, q: self.app.get(url + '?q={0}'.format(q))
 
     def test_post(self):
         """Test for creating a new instance of the database model using the
@@ -306,6 +327,23 @@ class TestAPI(TestSupport):
         # assert loads(response.data)['message'] == 'Validation error'
         # assert loads(response.data)['error_list'].keys() == ['age']
 
+        # Test the integrity exception by violating the unique 'name' field
+        # of person
+        response = self.app.post('/api/person',
+                                 data=dumps({'name': u'George', 'age': 23}))
+        assert response.status_code == 201
+
+        # This errors as expected
+        response = self.app.post('/api/person',
+                                 data=dumps({'name': u'George', 'age': 23}))
+        assert response.status_code == 400
+
+        # For issue #158 we make sure that the previous failure is rolled back
+        # so that we can add valid entries again
+        response = self.app.post('/api/person',
+                                 data=dumps({'name': u'Benjamin', 'age': 23}))
+        assert response.status_code == 201
+
         response = self.app.post('/api/person',
                                  data=dumps({'name': u'Lincoln', 'age': 23}))
         assert response.status_code == 201
@@ -314,7 +352,7 @@ class TestAPI(TestSupport):
         response = self.app.get('/api/person/1')
         assert response.status_code == 200
 
-        deep = {'computers': []}
+        deep = {'computers': [], 'projects': []}
         person = self.session.query(self.Person).filter_by(id=1).first()
         inst = to_dict(person, deep)
         assert loads(response.data) == inst
@@ -388,7 +426,10 @@ class TestAPI(TestSupport):
         assert loads(response.data)['inception_time'] is None
 
     def test_post_date_functions(self):
-        """Tests that assigning an string like CURRENT_TIMESTAMP gets converted into a date."""
+        """Tests that ``'CURRENT_TIMESTAMP'`` gets converted into a datetime
+        object when making a request to set a date or time field.
+
+        """
         self.manager.create_api(self.Star, methods=['GET', 'POST'])
         data = dict(inception_time='CURRENT_TIMESTAMP')
         response = self.app.post('/api/star', data=dumps(data))
@@ -401,6 +442,38 @@ class TestAPI(TestSupport):
         diff = datetime.utcnow() - inception_time
         assert diff.days == 0
         assert (diff.seconds + diff.microseconds / 1000000.0) < 3600
+
+    def test_serialize_time(self):
+        """Test for getting the JSON representation of a time field."""
+        self.manager.create_api(self.User, primary_key='id')
+        now = datetime.now().time()
+        user = self.User(id=1, email='foo', wakeup=now)
+        self.session.add(user)
+        self.session.commit()
+
+        response = self.app.get('/api/user/1')
+        assert response.status_code == 200
+        data = loads(response.data)
+        assert data['wakeup'] == now.isoformat()
+
+    def test_post_interval_functions(self):
+        oldJSONEncoder = self.flaskapp.json_encoder
+        class IntervalJSONEncoder(oldJSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, timedelta):
+                    return int(obj.days * 86400 + obj.seconds)
+                return oldJSONEncoder.default(self, obj)
+        self.flaskapp.json_encoder = IntervalJSONEncoder
+
+        self.manager.create_api(self.Satellite, methods=['GET', 'POST'])
+        data = dict(name="Callufrax_Minor", period=300)
+        response = self.app.post('/api/satellite', data=dumps(data))
+        assert response.status_code == 201
+        response = self.app.get('/api/satellite/Callufrax_Minor')
+        assert response.status_code == 200
+        assert loads(response.data)['period'] == 300
+        satellite = self.session.query(self.Satellite).first()
+        assert satellite.period == timedelta(0, 300)
 
     def test_post_with_submodels(self):
         """Tests the creation of a model with a related field."""
@@ -601,7 +674,7 @@ class TestAPI(TestSupport):
         assert 'id' in loads(response.data)
 
         # Making sure it has been created
-        deep = {'computers': []}
+        deep = {'computers': [], 'projects': []}
         person = self.session.query(self.Person).filter_by(id=1).first()
         inst = to_dict(person, deep)
         response = self.app.get('/api/person/1')
@@ -619,12 +692,11 @@ class TestAPI(TestSupport):
         """Test that deleting an instance of the model which does not exist
         fails.
 
-        This should give us the same response as when there is an object there,
-        since the :http:method:`delete` method is an idempotent method.
+        This should give us a 404 when the object is not found.
 
         """
         response = self.app.delete('/api/person/1')
-        assert response.status_code == 204
+        assert response.status_code == 404
 
     def test_disallow_patch_many(self):
         """Tests that disallowing "patch many" requests responds with a
@@ -669,8 +741,8 @@ class TestAPI(TestSupport):
         response = self.app.get('/api/v2/person')
         loaded = loads(response.data)['objects']
         for i in loaded:
-            assert i['birth_date'] == ('%s-%s-%s' % (
-                year, str(month).zfill(2), str(day).zfill(2)))
+            expected = '{0:4d}-{1:02d}-{2:02d}'.format(year, month, day)
+            assert i['birth_date'] == expected
 
     def test_patch_empty(self):
         """Test for making a :http:method:`patch` request with no data."""
@@ -727,8 +799,8 @@ class TestAPI(TestSupport):
         response = self.app.get('/api/v2/person')
         loaded = loads(response.data)['objects']
         for i in loaded:
-            assert i['birth_date'] == ('%s-%s-%s' % (
-                year, str(month).zfill(2), str(day).zfill(2)))
+            expected = '{0:4d}-{1:02d}-{2:02d}'.format(year, month, day)
+            assert i['birth_date'] == expected
 
     def test_patch_many_with_filter(self):
         """Test for updating a collection of instances of the model using a
@@ -863,11 +935,11 @@ class TestAPI(TestSupport):
                                             {'name': u'Maverick', 'seats': 2}]}
         response = self.app.post('/api/car_manufacturer', data=dumps(data))
         assert response.status_code == 201
-        data = loads(response.data)
+        responsedata = loads(response.data)
         assert 3 == len(data['models'])
-        assert u'Maverick' == data['models'][0]['name']
-        assert u'Mustang' == data['models'][1]['name']
-        assert u'Maverick' == data['models'][2]['name']
+        assert u'Maverick' == responsedata['models'][0]['name']
+        assert u'Mustang' == responsedata['models'][1]['name']
+        assert u'Maverick' == responsedata['models'][2]['name']
 
         # add another duplicate car
         data['models'].append({'name': u'Mustang', 'seats': 4})
@@ -1057,7 +1129,7 @@ class TestAPI(TestSupport):
         self.manager.create_api(self.Person, url_prefix='/api/v3',
                                 results_per_page=0)
         for i in range(25):
-            d = dict(name=unicode('person%s' % i))
+            d = dict(name='person{0}'.format(i))
             response = self.app.post('/api/person', data=dumps(d))
             assert response.status_code == 201
 
@@ -1109,15 +1181,15 @@ class TestAPI(TestSupport):
 
         """
         self.manager.create_api(self.Person)
-        for i in range(25):
-            d = dict(name=unicode('person%s' % i))
+        for i in range(15):
+            d = dict(name='person{0}'.format(i))
             response = self.app.post('/api/person', data=dumps(d))
             assert response.status_code == 201
         response = self.app.get('/api/person')
         assert response.status_code == 200
         data = loads(response.data)
         assert 'num_results' in data
-        assert data['num_results'] == 25
+        assert data['num_results'] == 15
 
     def test_alternate_primary_key(self):
         """Tests that models with primary keys which are not ``id`` columns are
@@ -1162,7 +1234,7 @@ class TestAPI(TestSupport):
 
         """
         self.manager.create_api(self.Person, methods=['POST', 'GET'])
-        for n in range(150):
+        for n in range(25):
             response = self.app.post('/api/person', data=dumps({}))
             assert 201 == response.status_code
         response = self.app.get('/api/person?results_per_page=20')
@@ -1175,10 +1247,10 @@ class TestAPI(TestSupport):
         data = loads(response.data)
         assert 10 == len(data['objects'])
         # Only return max number of results per page.
-        response = self.app.get('/api/person?results_per_page=120')
+        response = self.app.get('/api/person?results_per_page=30')
         assert 200 == response.status_code
         data = loads(response.data)
-        assert 100 == len(data['objects'])
+        assert 25 == len(data['objects'])
 
     def test_get_string_pk(self):
         """Tests for getting a row which has a string primary key, including
@@ -1192,7 +1264,7 @@ class TestAPI(TestSupport):
         self.Base.metadata.create_all()
         self.manager.create_api(StringID)
 
-        foo = StringID(name='1')
+        foo = StringID(name=u'1')
         self.session.add(foo)
         self.session.commit()
         response = self.app.get('/api/stringid/1')
@@ -1203,7 +1275,7 @@ class TestAPI(TestSupport):
         response = self.app.get('/api/stringid/01')
         assert 404 == response.status_code
 
-        bar = StringID(name='01')
+        bar = StringID(name=u'01')
         self.session.add(bar)
         self.session.commit()
         response = self.app.get('/api/stringid/01')
@@ -1212,7 +1284,7 @@ class TestAPI(TestSupport):
         assert 'name' in data
         assert '01' == data['name']
 
-        baz = StringID(name='hey')
+        baz = StringID(name=u'hey')
         self.session.add(baz)
         self.session.commit()
         response = self.app.get('/api/stringid/hey')
@@ -1223,20 +1295,20 @@ class TestAPI(TestSupport):
 
     def test_jsonp(self):
         """Test for JSON-P callbacks."""
-        person1 = self.Person(name='foo')
-        person2 = self.Person(name='bar')
+        person1 = self.Person(name=u'foo')
+        person2 = self.Person(name=u'bar')
         self.session.add_all([person1, person2])
         self.session.commit()
         # test for GET
         response = self.app.get('/api/person/1?callback=baz')
         assert 200 == response.status_code
-        assert response.data.startswith('baz(')
-        assert response.data.endswith(')')
+        assert response.data.startswith(b'baz(')
+        assert response.data.endswith(b')')
         # test for search
         response = self.app.get('/api/person?callback=baz')
         assert 200 == response.status_code
-        assert response.data.startswith('baz(')
-        assert response.data.endswith(')')
+        assert response.data.startswith(b'baz(')
+        assert response.data.endswith(b')')
 
     def test_duplicate_post(self):
         """Tests for making a :http:method:`post` request with data that
@@ -1287,6 +1359,51 @@ class TestAPI(TestSupport):
         # response = self.app.get('/api/computers')
         # assert response.status_code == 200
         # assert len(loads(response.data)['objects']) == 0
+
+    def test_get_callable_query_attribute(self):
+        """Tests that a callable model.query attribute is being used
+        when available.
+
+        """
+        # create aliases for the sake of brevity
+        CarModel, CarManufacturer = self.CarModel, self.CarManufacturer
+
+        # create some example car manufacturers and models
+        manufacturer_name = u'Super Cars Ltd.'
+        cm1 = CarManufacturer(name=manufacturer_name)
+        cm2 = CarManufacturer(name=u'Trash Cars Ltd.')
+        self.session.add_all((cm1, cm2))
+
+        car1 = CarModel(name=u'Luxory deluxe L', manufacturer=cm1)
+        car2 = CarModel(name=u'Luxory deluxe XL', manufacturer=cm1)
+        car3 = CarModel(name=u'Broken wheel', manufacturer=cm2)
+        self.session.add_all((car1, car2, car3))
+        self.session.commit()
+
+        # create a custom query method for the CarModel class
+        def query(cls):
+            car_model = self.session.query(CarModel)
+            return car_model.join(CarManufacturer).filter(
+                CarManufacturer.name==manufacturer_name)
+        CarModel.query = classmethod(query)
+
+        response = self.app.get('/api/car_model')
+        assert 200 == response.status_code
+        data = loads(response.data)
+        assert 2 == len(data['objects'])
+
+        for car in data['objects']:
+          assert car['manufacturer']['name'] == manufacturer_name
+
+        for car in [car1, car2]:
+          response = self.app.get('/api/car_model/{0}'.format(car.id))
+          assert 200 == response.status_code
+          data = loads(response.data)
+          assert data['manufacturer_id'] == cm1.id
+          assert data['name'] == car.name
+
+        response = self.app.get('/api/car_model/{0}'.format(car3.id))
+        assert 404 == response.status_code
 
 
 class TestHeaders(TestSupportPrefilled):
@@ -1370,27 +1487,73 @@ class TestHeaders(TestSupportPrefilled):
         assert 'application/json' == response.headers['Content-Type']
         assert 'x' == loads(response.data)['name']
 
+    def test_content_type_msie(self):
+        """Tests for compatibility with Microsoft Internet Explorer 8 and 9.
+
+        According to issue #267, making requests using JavaScript from these
+        web browsers does not allow changing the content type of the request
+        (it is always ``text/html``). Therefore :http:method:`post` and
+        :http:method:`patch` should ignore the content type when a request is
+        coming from these old browsers.
+
+        """
+        # Test for Microsoft Internet Explorer 8.
+        headers = {'User-Agent': '{0}'.format(MSIE8_UA)}
+        content_type = 'text/html'
+        data = dict(name=u'foo')
+        response = self.app.post('/api/person', data=dumps(data),
+                                 headers=headers, content_type=content_type)
+        assert response.status_code == 201
+        person = loads(response.data)
+        assert person['name'] == 'foo'
+        personid = person['id']
+        data = dict(name=u'bar')
+        response = self.app.patch('/api/person/{0}'.format(personid),
+                                  data=dumps(data), headers=headers,
+                                  content_type=content_type)
+        assert response.status_code == 200
+        person = loads(response.data)
+        assert person['name'] == 'bar'
+
+        # Test for Microsoft Internet Explorer 9.
+        headers = {'User-Agent': '{0}'.format(MSIE9_UA)}
+        data = dict(name=u'foo2')
+        response = self.app.post('/api/person', data=dumps(data),
+                                 headers=headers, content_type=content_type)
+        assert response.status_code == 201
+        personid = loads(response.data)['id']
+        data = dict(name=u'bar2')
+        response = self.app.patch('/api/person/{0}'.format(personid),
+                                  data=dumps(data), headers=headers,
+                                  content_type=content_type)
+        assert response.status_code == 200
+        assert loads(response.data)['name'] == 'bar2'
+
     def test_accept(self):
         """Tests that the server responds to the ``Accept`` with a response of
         the correct content-type.
 
         """
         # A request without an Accept header should return JSON.
-        response = self.app.get('/api/person/1')
+        headers = None
+        response = self.app.get('/api/person/1', headers=headers)
         assert 200 == response.status_code
         assert 'Content-Type' in response.headers
         assert 'application/json' == response.headers['Content-Type']
         assert 1 == loads(response.data)['id']
-        response = self.app.get('/api/person/1',
-                                headers=dict(Accept='application/json'))
+        headers = dict(Accept='application/json')
+        response = self.app.get('/api/person/1', headers=headers)
         assert 200 == response.status_code
         assert 'Content-Type' in response.headers
         assert 'application/json' == response.headers['Content-Type']
         assert 1 == loads(response.data)['id']
-        #headers = dict(Accept='application/xml')
-        #assert 'Content-Type' in response.headers
-        #assert 'application/xml' == response.headers['Content-Type']
-        #assert '<id>1</id>' in response.data
+        # Check for accepting XML.
+        # headers = dict(Accept='application/xml')
+        # response = self.app.get('/api/person/1', headers=headers)
+        # assert 200 == response.status_code
+        # assert 'Content-Type' in response.headers
+        # assert 'application/xml' == response.headers['Content-Type']
+        # assert '<id>1</id>' in response.data
 
 
 class TestSearch(TestSupportPrefilled):
@@ -1405,7 +1568,7 @@ class TestSearch(TestSupportPrefilled):
         """
         super(TestSearch, self).setUp()
         self.manager.create_api(self.Person, methods=['GET', 'PATCH'])
-        self.app.search = lambda url, q: self.app.get(url + '?q=%s' % q)
+        self.app.search = lambda url, q: self.app.get(url + '?q={0}'.format(q))
 
     def test_search(self):
         """Tests basic search using the :http:method:`get` method."""
@@ -1435,7 +1598,7 @@ class TestSearch(TestSupportPrefilled):
         # Looking for something that does not exist on the database
         search['filters'][0]['val'] = 'Sammy'
         resp = self.app.search('/api/person', dumps(search))
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         assert loads(resp.data)['message'] == 'No result found'
 
         # We have to receive an error if the user provides an invalid
@@ -1530,6 +1693,30 @@ class TestSearch(TestSupportPrefilled):
         resp = self.app.search('/api/person', dumps(search))
         assert resp.status_code == 200
         assert 1 == len(loads(resp.data)['objects'])
+        assert loads(resp.data)['num_results'] == 1
+        assert loads(resp.data)['objects'][0]['name'] == u'Mary'
+
+        # Testing limit by itself
+        search = {'limit': 1}
+        resp = self.app.search('/api/person', dumps(search))
+        assert resp.status_code == 200
+        assert 1 == len(loads(resp.data)['objects'])
+        assert loads(resp.data)['num_results'] == 1
+        assert loads(resp.data)['objects'][0]['name'] == u'Lincoln'
+
+        search = {'limit': 5000}
+        resp = self.app.search('/api/person', dumps(search))
+        assert resp.status_code == 200
+        assert 5 == len(loads(resp.data)['objects'])
+        assert loads(resp.data)['num_results'] == 5
+        assert loads(resp.data)['objects'][0]['name'] == u'Lincoln'
+
+         # Testing offset by itself
+        search = {'offset': 1}
+        resp = self.app.search('/api/person', dumps(search))
+        assert resp.status_code == 200
+        assert 4 == len(loads(resp.data)['objects'])
+        assert loads(resp.data)['num_results'] == 4
         assert loads(resp.data)['objects'][0]['name'] == u'Mary'
 
         # Testing multiple results when calling .one()
@@ -1591,15 +1778,41 @@ class TestAssociationProxy(DatabaseTestBase):
                                    ForeignKey('product.id'),
                                    primary_key=True))
 
+        # Metadata is a key-value pair, used to test for association
+        # proxies that use AssociationDict types
+        # this is the association table for Image->metadata
+        product_meta = Table('product_meta', self.Base.metadata,
+                 Column('image_id', Integer, ForeignKey('image.id')),
+                 Column('meta_id', Integer, ForeignKey('meta.id')))
+
         # For brevity, create this association proxy creator functions here.
         creator1 = lambda product: ChosenProductImage(product=product)
         creator2 = lambda image: ChosenProductImage(image=image)
+        creator3 = lambda key, value: Metadata(key, value)
+        class Metadata(self.Base):
+            def __init__(self, key, value):
+                super(Metadata, self).__init__()
+                self.key = key
+                self.value = value
+
+            __tablename__ = 'meta'
+            id = Column(Integer, primary_key=True)
+            key = Column(String(256), nullable=False)
+            value = Column(String(256))
 
         class Image(self.Base):
             __tablename__ = 'image'
             id = Column(Integer, primary_key=True)
             products = prox('chosen_product_images', 'product',
                             creator=creator1)
+
+            meta_store = rel('Metadata',
+                             cascade='all',
+                             backref=backref(name='metadata'),
+                             collection_class=col_mapped(
+                                                    Metadata.__table__.c.key),
+                             secondary=lambda: product_meta)
+            meta = prox('meta_store', 'value', creator=creator3)
 
         class ChosenProductImage(self.Base):
             __tablename__ = 'chosen_product_image'
@@ -1610,7 +1823,7 @@ class TestAssociationProxy(DatabaseTestBase):
             image = rel('Image', backref=backref(name='chosen_product_images',
                                                  cascade="all, delete-orphan"),
                         enable_typechecks=False)
-            name = Column(Unicode, default=lambda: "default name")
+            name = Column(Unicode, default=lambda: u'default name')
 
         class Tag(self.Base):
             __tablename__ = 'tag'
@@ -1626,7 +1839,7 @@ class TestAssociationProxy(DatabaseTestBase):
             chosen_images = prox('chosen_product_images', 'image',
                                  creator=creator2)
             image_names = prox('chosen_product_images', 'name')
-            tags = rel(Tag, secondary=tag_product,
+            tags = rel(Tag, secondary=tag_product, lazy='joined',
                        backref=backref(name='products', lazy='dynamic'))
             tag_names = prox('tags', 'name',
                              creator=lambda tag_name: Tag(name=tag_name))
@@ -1665,6 +1878,12 @@ class TestAssociationProxy(DatabaseTestBase):
         assert 'products' in data
         assert {'id': 1} in data['products']
 
+    def _check_meta_relation(self):
+        response = self.app.get('/api/image/1')
+        data = loads(response.data)
+        assert 'meta_store' in data
+        assert 'file type' in data['meta_store']
+
     def _check_relations_two(self):
         """Makes :http:method:`get` requests for the product with ID 1 and the
         images with ID 1 and 2, ensuring that the product has a relationship
@@ -1692,6 +1911,15 @@ class TestAssociationProxy(DatabaseTestBase):
         data = loads(response.data)
         assert 'products' in data
         assert {'id': 1} in data['products']
+
+    def test_assoc_dict_put(self):
+        data = {'products': [{'id': 1}],
+                'meta':[{'key':'file type', 'value': 'png'}]
+               }
+        response = self.app.post('/api/image', data=dumps(data))
+        assert response.status_code == 201
+
+        self._check_meta_relation()
 
     def test_get_data(self):
         """Tests that a :http:method:`get` request exhibits the correct
@@ -1861,3 +2089,12 @@ class TestAssociationProxy(DatabaseTestBase):
         data = loads(response.data)
 
         assert sorted(data['tag_names']), sorted(['tag1' == 'tag2'])
+
+    def test_num_results(self):
+        self.session.add(self.Product(tag_names=['tag1', 'tag2']))
+        self.session.commit()
+
+        response = self.app.get('/api/product')
+        assert response.status_code == 200
+        data = loads(response.data)
+        assert data['num_results'] == 1

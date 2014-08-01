@@ -13,6 +13,7 @@ import uuid
 
 from flask import Flask
 from nose import SkipTest
+from sqlalchemy import Boolean
 from sqlalchemy import Column
 from sqlalchemy import create_engine
 from sqlalchemy import Date
@@ -20,7 +21,8 @@ from sqlalchemy import DateTime
 from sqlalchemy import Float
 from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
-from sqlalchemy import Boolean
+from sqlalchemy import Interval
+from sqlalchemy import Time
 from sqlalchemy import Unicode
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
@@ -31,6 +33,8 @@ from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import TypeDecorator
+from sqlalchemy.ext.associationproxy import association_proxy
+
 
 from flask.ext.restless import APIManager
 
@@ -44,7 +48,7 @@ def skip_unless(condition, reason=None):
 
     """
     def skip(test):
-        message = 'Skipped %s: %s' % (test.__name__, reason)
+        message = 'Skipped {0}: {1}'.format(test.__name__, reason)
 
         # TODO Since we don't check the case in which `test` is a class, the
         # result of running the tests will be a single skipped test, although
@@ -79,9 +83,9 @@ class GUID(TypeDecorator):
         if dialect.name == 'postgresql':
             return str(value)
         if not isinstance(value, uuid.UUID):
-            return "%.32x" % uuid.UUID(value)
+            return '{0:.32x}'.format(uuid.UUID(value))
         # hexstring
-        return "%.32x" % value
+        return '{0:.32x}'.format(value)
 
     def process_result_value(self, value, dialect):
         if value is None:
@@ -181,9 +185,9 @@ class TestSupport(DatabaseTestBase):
         class ComputerProgram(self.Base):
             __tablename__ = 'computer_program'
             computer_id = Column(Integer, ForeignKey('computer.id'),
-                                                     primary_key=True)
+                                 primary_key=True)
             program_id = Column(Integer, ForeignKey('program.id'),
-                                                    primary_key=True)
+                                primary_key=True)
             licensed = Column(Boolean, default=False)
             program = relationship('Program')
 
@@ -195,7 +199,9 @@ class TestSupport(DatabaseTestBase):
             buy_date = Column(DateTime)
             owner_id = Column(Integer, ForeignKey('person.id'))
             owner = relationship('Person')
-            programs = relationship('ComputerProgram', cascade="all, delete-orphan")
+            programs = relationship('ComputerProgram',
+                                    cascade="all, delete-orphan",
+                                    backref='computer')
 
             def speed(self):
                 return 42
@@ -204,21 +210,22 @@ class TestSupport(DatabaseTestBase):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
             name = Column(Unicode, unique=True)
-            age = Column(Float)
+            age = Column(Integer)
             other = Column(Float)
             birth_date = Column(Date)
             computers = relationship('Computer')
 
             @hybrid_property
             def is_minor(self):
+                if getattr(self, 'age') is None:
+                    return None
                 return self.age < 18
 
             def name_and_age(self):
-                return "%s (aged %d)" % (self.name, self.age)
+                return "{0} (aged {1:d})".format(self.name, self.age)
 
             def first_computer(self):
                 return sorted(self.computers, key=lambda k: k.name)[0]
-
 
         class LazyComputer(self.Base):
             __tablename__ = 'lazycomputer'
@@ -233,9 +240,20 @@ class TestSupport(DatabaseTestBase):
             id = Column(Integer, primary_key=True)
             name = Column(Unicode)
 
+        class User(self.Base):
+            __tablename__ = 'user'
+            id = Column(Integer, primary_key=True)
+            email = Column(Unicode, primary_key=True)
+            wakeup = Column(Time)
+
         class Planet(self.Base):
             __tablename__ = 'planet'
             name = Column(Unicode, primary_key=True)
+
+        class Satellite(self.Base):
+            __tablename__ = 'satellite'
+            name = Column(Unicode, primary_key=True)
+            period = Column(Interval, nullable=True)
 
         class Star(self.Base):
             __tablename__ = 'star'
@@ -262,17 +280,36 @@ class TestSupport(DatabaseTestBase):
             name = Column(Unicode)
             models = relationship('CarModel')
 
+        class Project(self.Base):
+            __tablename__ = 'project'
+            id = Column(Integer, primary_key=True)
+            person_id = Column(Integer, ForeignKey('person.id'))
+            person = relationship('Person',
+                                 backref=backref('projects', lazy='dynamic'))
+
+        class Proof(self.Base):
+            __tablename__ = 'proof'
+            id = Column(Integer, primary_key=True)
+            project = relationship('Project', backref=backref('proofs', lazy='dynamic'))
+            project_id = Column(Integer, ForeignKey('project.id'))
+            person = association_proxy('project', 'person')
+            person_id = association_proxy('project', 'person_id')
+
         self.Person = Person
         self.Program = Program
         self.ComputerProgram = ComputerProgram
         self.LazyComputer = LazyComputer
         self.LazyPerson = LazyPerson
+        self.User = User
         self.Computer = Computer
         self.Planet = Planet
+        self.Satellite = Satellite
         self.Star = Star
         self.Vehicle = Vehicle
         self.CarManufacturer = CarManufacturer
         self.CarModel = CarModel
+        self.Project = Project
+        self.Proof = Proof
 
         # create all the tables required for the models
         self.Base.metadata.create_all()

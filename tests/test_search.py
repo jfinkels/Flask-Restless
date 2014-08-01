@@ -82,7 +82,7 @@ class TestQueryCreation(TestSupportPrefilled):
         assert query.one().computers[0].name == 'turing'
 
         d = {'filters': [{'name': 'age', 'op': 'lte', 'field': 'other'}],
-            'order_by': [{'field': 'other'}]}
+             'order_by': [{'field': 'other'}]}
         query = create_query(self.session, self.Person, d)
         assert query.count() == 2
         results = query.all()
@@ -145,6 +145,8 @@ class TestOperators(TestSupportPrefilled):
         d = dict(filters=[dict(name='birth_date', op='is_not_null')])
         result = search(self.session, self.Person, d)
         assert result.count() == 1
+        d = dict(filters=[dict(name='birth_date', op='eq', val=None)])
+        assert_raises(TypeError, search, self.session, self.Person, d)
 
     def test_desc_and_asc(self):
         """Tests for the ``"desc"`` and ``"asc"`` operators."""
@@ -167,7 +169,7 @@ class TestOperators(TestSupportPrefilled):
         computer5 = self.Computer(name=u'c5', vendor=u'foo')
         computer6 = self.Computer(name=u'c6', vendor=u'foo')
         self.session.add_all((computer1, computer2, computer3, computer4,
-                                 computer5, computer6))
+                              computer5, computer6))
         self.session.commit()
         # add the computers to three test people
         person1, person2, person3 = self.people[:3]
@@ -197,11 +199,15 @@ class TestOperators(TestSupportPrefilled):
         computer1 = self.Computer(name=u'c1', vendor=u'foo')
         computer2 = self.Computer(name=u'c2', vendor=u'bar')
         computer3 = self.Computer(name=u'c3', vendor=u'bar')
-        computer4 = self.Computer(name=u'c4', vendor=u'bar')
-        computer5 = self.Computer(name=u'c5', vendor=u'foo')
+        computer4 = self.Computer(name=u'c4', vendor=None, programs=[
+            self.ComputerProgram(program=self.Program())
+        ])
+        computer5 = self.Computer(name=u'c5', vendor=u'foo', programs=[
+            self.ComputerProgram(program=self.Program())
+        ])
         computer6 = self.Computer(name=u'c6', vendor=u'foo')
         self.session.add_all((computer1, computer2, computer3, computer4,
-                                 computer5, computer6))
+                              computer5, computer6))
         self.session.commit()
         # add the computers to three test people
         person1, person2, person3 = self.people[:3]
@@ -214,11 +220,19 @@ class TestOperators(TestSupportPrefilled):
         d = dict(filters=[dict(name='computers', op='any', val=val)])
         result = search(self.session, self.Person, d)
         assert result.count() == 2
+        val = dict(name='vendor', op='is_null')
+        d = dict(filters=[dict(name='computers', op='any', val=val)])
+        result = search(self.session, self.Person, d)
+        assert result.count() == 1
         # test 'has'
-        val=dict(name='name', op='like', val=u'%incol%')
+        val = dict(name='name', op='like', val=u'%incol%')
         d = dict(filters=[dict(name='owner', op='has', val=val)])
         result = search(self.session, self.Computer, d)
         assert result.count() == 3
+        val = dict(name='vendor', op='is_null')
+        d = dict(filters=[dict(name='computer', op='has', val=val)])
+        result = search(self.session, self.ComputerProgram, d)
+        assert result.count() == 1
 
     def test_has_and_any_nested_suboperators(self):
         """Tests for the ``"has"`` and ``"any"`` operators with nested
@@ -237,7 +251,7 @@ class TestOperators(TestSupportPrefilled):
         computer5 = self.Computer(name=u'c5', vendor=u'foo')
         computer6 = self.Computer(name=u'c6', vendor=u'foo')
         self.session.add_all((computer1, computer2, computer3, computer4,
-                                 computer5, computer6))
+                              computer5, computer6))
         self.session.commit()
         # add the computers to three test people
         person1, person2, person3 = self.people[:3]
@@ -252,7 +266,7 @@ class TestOperators(TestSupportPrefilled):
         result = search(self.session, self.Person, d)
         assert result.count() == 1
         # test 'has'
-        innerval = dict(name='vendor', op='like', val='%o%')
+        innerval = dict(name='vendor', op='like', val=u'%o%')
         val = dict(name='computers', op='any', val=innerval)
         d = dict(filters=[dict(name='owner', op='has', val=val)])
         result = search(self.session, self.Computer, d)

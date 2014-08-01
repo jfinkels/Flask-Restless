@@ -34,7 +34,7 @@ class TestProcessors(TestSupport):
         super(TestProcessors, self).setUp()
 
         # to facilitate searching
-        self.app.search = lambda url, q: self.app.get(url + '?q=%s' % q)
+        self.app.search = lambda url, q: self.app.get(url + '?q={0}'.format(q))
 
     def test_get_single_preprocessor(self):
         """Tests :http:method:`get` requests for a single object with
@@ -43,8 +43,8 @@ class TestProcessors(TestSupport):
         """
 
         def check_permissions(**kw):
-            raise ProcessingException(status_code=403,
-                                      message='Permission denied')
+            raise ProcessingException(code=403,
+                                      description='Permission denied')
 
         pre = dict(GET_SINGLE=[check_permissions])
         self.manager.create_api(self.Person, methods=['GET', 'POST'],
@@ -53,6 +53,19 @@ class TestProcessors(TestSupport):
         assert 201 == response.status_code
         response = self.app.get('/api/person/1')
         assert response.status_code == 403
+
+    def test_get_many_postprocessor(self):
+        filt = dict(name='id', op='in', val=[1, 3])
+
+        def foo(search_params=None, **kw):
+            assert filt in search_params['filters']
+
+        post = dict(GET_MANY=[foo])
+        self.manager.create_api(self.Person, methods=['GET', 'POST'],
+                                postprocessors=post)
+        query = dict(filters=[filt])
+        response = self.app.search('/api/person', dumps(query))
+        assert response.status_code == 200
 
     def test_get_many_preprocessor(self):
         def check_permissions(search_params=None, **kw):
@@ -93,8 +106,8 @@ class TestProcessors(TestSupport):
                 data['other'] = 7
 
         def check_permissions(data=None, **kw):
-            raise ProcessingException(status_code=403,
-                                      message='Permission denied')
+            raise ProcessingException(code=403,
+                                      description='Permission denied')
 
         self.manager.create_api(self.Person, methods=['POST'],
                                 url_prefix='/api/v2',
@@ -120,8 +133,8 @@ class TestProcessors(TestSupport):
 
         """
         def check_permissions(**kw):
-            raise ProcessingException(status_code=403,
-                                      message='Permission denied')
+            raise ProcessingException(code=403,
+                                      description='Permission denied')
 
         pre = dict(DELETE=[check_permissions])
         # recreate the api at /api/v1/person
@@ -151,8 +164,8 @@ class TestProcessors(TestSupport):
         """
 
         def check_permissions(**kw):
-            raise ProcessingException(status_code=403,
-                                      message='Permission denied')
+            raise ProcessingException(code=403,
+                                      description='Permission denied')
 
         pre = dict(PATCH_SINGLE=[check_permissions])
         # recreate the api at /api/v1/person
@@ -236,8 +249,8 @@ class TestProcessors(TestSupport):
         response = self.app.get('/api/person')
         loaded = loads(response.data)['objects']
         for i in loaded:
-            assert i['birth_date'] == ('%s-%s-%s' % (
-                year, str(month).zfill(2), str(day).zfill(2)))
+            expected = '{0:4d}-{1:02d}-{2:02d}'.format(year, month, day)
+            assert i['birth_date'] == expected
             assert i['other'] == 27
 
     def test_processor_no_change(self):
@@ -262,7 +275,7 @@ class TestProcessors(TestSupport):
         assert person.age == 23
 
         # Test for GET_SINGLE
-        response = self.app.get('/api/v2/person/%d' % personid)
+        response = self.app.get('/api/v2/person/{0:d}'.format(personid))
         assert response.status_code == 200
 
         person_response = loads(response.data)
@@ -283,17 +296,16 @@ class TestProcessors(TestSupport):
 
         """
         # Create some people in the database.
-        person1 = self.Person(name='foo')
-        person2 = self.Person(name='bar')
-        person3 = self.Person(name='baz')
+        person1 = self.Person(name=u'foo')
+        person2 = self.Person(name=u'bar')
+        person3 = self.Person(name=u'baz')
         self.session.add_all((person1, person2, person3))
         self.session.commit()
-
         # Create a preprocessor function that adds a filter.
         def add_filter(search_params=None, **kw):
             if search_params is None:
                 return
-            filt = dict(name='name', op='like', val='ba%')
+            filt = dict(name='name', op='like', val=u'ba%')
             if 'filters' not in search_params:
                 search_params['filters'] = []
             search_params['filters'].append(filt)

@@ -101,14 +101,14 @@ If you are using pure SQLAlchemy::
 Second, instantiate a :class:`flask.ext.restless.APIManager` object with the
 :class:`~flask.Flask` and :class:`~flask.ext.sqlalchemy.SQLAlchemy` objects::
 
-    from flask.ext.restless import APIManager
+    import flask.ext.restless
 
-    manager = APIManager(app, flask_sqlalchemy_db=db)
+    manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
 
 Or if you are using pure SQLAlchemy, specify the session you created above
 instead::
 
-    manager = APIManager(app, session=mysession)
+    manager = flask.ext.restless.APIManager(app, session=mysession)
 
 Third, create the API endpoints which will be accessible to web clients::
 
@@ -165,6 +165,6 @@ the URL is the value of ``Person.__tablename__``::
     }
 
 If the primary key is a :class:`~sqlalchemy.Unicode` instead of an
-:class:`~sqlalchemy.Integer`, the instances will be accesible at URL endpoints
+:class:`~sqlalchemy.Integer`, the instances will be accessible at URL endpoints
 like ``http://<host>:<port>/api/person/foo`` instead of
 ``http://<host>:<port>/api/person/1``.

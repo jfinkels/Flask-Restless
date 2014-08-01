@@ -13,7 +13,11 @@ from datetime import datetime
 import uuid
 
 from nose.tools import assert_raises
+from sqlalchemy import Column
+from sqlalchemy import ForeignKey
+from sqlalchemy import Integer
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import relationship
 
 from flask.ext.restless.helpers import evaluate_functions
 from flask.ext.restless.helpers import get_columns
@@ -21,23 +25,69 @@ from flask.ext.restless.helpers import get_relations
 from flask.ext.restless.helpers import partition
 from flask.ext.restless.helpers import primary_key_name
 from flask.ext.restless.helpers import to_dict
-from flask.ext.restless.helpers import unicode_keys_to_strings
 from flask.ext.restless.helpers import upper_keys
+from flask.ext.restless.helpers import get_by
+from flask.ext.restless.helpers import is_like_list
 
 from .helpers import TestSupport
 from .helpers import TestSupportPrefilled
+from .helpers import DatabaseTestBase
+
+
+class TestSessionQuery(DatabaseTestBase):
+    """Unit test for the :func:`session_query` function."""
+
+    def setUp(self):
+        """Creates example tables to test the various behaviours of
+        :func:`session_query`.
+
+        """
+        super(TestSessionQuery, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            family_id = Column(Integer, ForeignKey('family.id'))
+            family = relationship('Family')
+
+            @classmethod
+            def query(cls):
+                person = self.session.query(Person)
+                return person.join((Family, Person.family_id == Family.id))
+
+        class Family(self.Base):
+            __tablename__ = 'family'
+            id = Column(Integer, primary_key=True)
+
+        self.Person = Person
+        self.Family = Family
+
+        # create all the tables required for the models
+        self.Base.metadata.create_all()
+
+    def tearDown(self):
+        """Drops all tables from the temporary database."""
+        self.Base.metadata.drop_all()
+
+    def test_callable_query(self):
+        """Test for :func:`session_query` when the model has a callable
+        ``query`` attribute.
+
+        """
+        family = self.Family()
+        person1 = self.Person(family=family)
+        person2 = self.Person(family=family)
+        self.session.add(family)
+        self.session.add(person1)
+        self.session.add(person2)
+        self.session.commit()
+
+        person_test = get_by(self.session, self.Person, person1.id)
+        assert person1 == person_test
 
 
 class TestHelpers(object):
     """Unit tests for the helper functions."""
-
-    def test_unicode_keys_to_strings(self):
-        """Test for converting keys of a dictionary from ``unicode`` to
-        ``string`` objects.
-
-        """
-        for k in unicode_keys_to_strings({u'x': 1, u'y': 2, u'z': 3}):
-            assert isinstance(k, str)
 
     def test_partition(self):
         """Test for partitioning a list into two lists based on a given
@@ -103,7 +153,7 @@ class TestModelHelpers(TestSupport):
 
         me_dict = to_dict(me)
         expectedfields = sorted(['birth_date', 'age', 'id', 'name',
-            'other', 'is_minor'])
+                                 'other', 'is_minor'])
         assert sorted(me_dict) == expectedfields
         assert me_dict['name'] == u'Lincoln'
         assert me_dict['age'] == 24
@@ -123,9 +173,9 @@ class TestModelHelpers(TestSupport):
         the dictionary representation of an instance of a model.
 
         """
-        person = self.LazyPerson(name='Lincoln')
+        person = self.LazyPerson(name=u'Lincoln')
         self.session.add(person)
-        computer = self.LazyComputer(name='lixeiro')
+        computer = self.LazyComputer(name=u'lixeiro')
         self.session.add(computer)
         person.computers.append(computer)
         self.session.commit()
@@ -171,8 +221,8 @@ class TestModelHelpers(TestSupport):
 
     def test_to_dict_nested_object(self):
         """Tests that nested objects are correctly serialized."""
-        person = self.Person(name='Test', age=10, other=20)
-        computer = self.Computer(name='foo')
+        person = self.Person(name=u'Test', age=10, other=20)
+        computer = self.Computer(name=u'foo')
         person.computers.append(computer)
 
         data = to_dict(person, include_methods=['first_computer'])
@@ -194,6 +244,21 @@ class TestModelHelpers(TestSupport):
         """Tests getting the names of the relations of a model as strings."""
         relations = get_relations(self.Person)
         assert relations == ['computers']
+
+    def test_is_like_list(self):
+        """Tests if the relation of `instance` whose name is `relation` is
+        list-like.
+
+        """
+        person = self.Person(name=u'Frankie', age=29)
+        project = self.Project(person=person)
+        proof = self.Proof(project=project)
+
+        self.session.add_all([person, project, proof])
+        self.session.commit()
+
+        assert is_like_list(proof, 'person') == False
+        assert is_like_list(proof, 'person_id') == False
 
 
 class TestFunctionEvaluation(TestSupportPrefilled):

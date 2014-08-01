@@ -7,16 +7,81 @@ Numbers following a pound sign (#) refer to `GitHub issues
 
 .. note::
 
+   As of version 0.13.0, Flask-Restless supports Python 2.6, 2.7, and 3. Before
+   that, it supported Python 2.5, 2.6, and 2.7.
+
+.. note::
+
    As of version 0.6, Flask-Restless supports both pure SQLAlchemy and
    Flask-SQLAlchemy models. Before that, it supported only Elixir models.
 
-Version 0.12.1-dev
+Version 0.14.0-dev
 ------------------
 
 Not yet released.
 
+- #299: show error message if search query tests for ``NULL`` using comparison
+  operators.
+- #315: check for query object being ``None``.
+- #324: :http:method:`delete` should only return :http:status:`204` if
+  something is actuall deleted.
+- #325: support ``null`` inside ``has`` search operators.
+- #328: enable automatic testing for Python 3.4.
+- #333: enforce limit in :func:`helpers.count`.
+
+Version 0.13.1
+--------------
+
+Released on April 21, 2014.
+
+- #304: fixes mimerender bug due to how Python 3.4 handles decorators.
+
+Version 0.13.0
+--------------
+
+Released on April 6, 2014.
+
+- Allows universal preprocessors or postprocessors; see :ref:`universal`.
+- Allows specifying which primary key to use when creating endpoint URLs.
+- Requires SQLAlchemy version 0.8 or greater.
+- #17: use Flask's :attr:`flask.Request.json` to parse incoming JSON requests.
+- #29: replace custom ``jsonify_status_code`` function with built-in support
+  for ``return jsonify(), status_code`` style return statements (new in Flask
+  0.9).
+- #51: Use `mimerender <http://mimerender.readthedocs.org>`_ to render
+  dictionaries to JSON format.
+- #247: adds support for making :http:method:`post` requests to dictionary-like
+  association proxies.
+- #249: returns :http:status:`404` if a search reveals no matching results.
+- #254: returns :http:status:`404` if no related field exists for a request
+  with a related field in the URL.
+- #256: makes search parameters available to postprocessors for
+  :http:method:`get` and :http:method:`patch` requests that access multiple
+  resources.
+- #263: Adds Python 3.3 support; drops Python 2.5 support.
+- #267: Adds compatibility for legacy Microsoft Internet Explorer versions 8
+  and 9.
+- #270: allows the ``query`` attribute on models to be a callable.
+- #282: order responses by primary key if no order is specified.
+- #284: catch ``DataError`` and ``ProgrammingError`` exceptions when bad data
+  are sent to the server.
+- #286: speed up paginated responses by using optimized count() function.
+- #293: allows :class:`sqlalchemy.Time` fields in JSON responses.
+
+Version 0.12.1
+--------------
+
+Released on December 1, 2013.
+
 - #222: on :http:method:`post` and :http:method:`patch` requests, recurse into
   nested relations to get or create instances of related models.
+- #246: adds `pysqlite <https://pypi.python.org/pypi/pysqlite>`_ to test
+  requirements.
+- #260: return a single object when making a :http:method:`get` request to a
+  relation sub-URL.
+- #264: all methods now execute postprocessors after setting headers.
+- #265: convert strings to dates in related models when making
+  :http:method:`post` requests.
 
 Version 0.12.0
 --------------

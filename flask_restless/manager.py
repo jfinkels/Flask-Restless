@@ -11,6 +11,7 @@
     :license: GNU AGPLv3+ or BSD
 
 """
+from collections import defaultdict
 
 from flask import Blueprint
 
@@ -79,7 +80,7 @@ class APIManager(object):
     #:
     #: This format string expects the name of a model to be provided when
     #: formatting.
-    APINAME_FORMAT = '%sapi'
+    APINAME_FORMAT = '{0}api'
 
     #: The format of the name of the blueprint containing the API view for a
     #: given model.
@@ -89,10 +90,12 @@ class APIManager(object):
     #: 1. name of the API view of a specific model
     #: 2. a number representing the number of times a blueprint with that name
     #:    has been registered.
-    BLUEPRINTNAME_FORMAT = '%s%s'
+    BLUEPRINTNAME_FORMAT = '{0}{1}'
 
-    def __init__(self, app=None, session=None, flask_sqlalchemy_db=None):
-        self.init_app(app, session, flask_sqlalchemy_db)
+    def __init__(self, app=None, session=None, flask_sqlalchemy_db=None,
+                 preprocessors=None, postprocessors=None):
+        self.init_app(app, session, flask_sqlalchemy_db, preprocessors,
+                      postprocessors)
 
     def _next_blueprint_name(self, basename):
         """Returns the next name for a blueprint with the specified base name.
@@ -119,9 +122,10 @@ class APIManager(object):
             b = basename
             existing_numbers = [int(n.partition(b)[-1]) for n in existing]
             next_number = max(existing_numbers) + 1
-        return APIManager.BLUEPRINTNAME_FORMAT % (basename, next_number)
+        return APIManager.BLUEPRINTNAME_FORMAT.format(basename, next_number)
 
-    def init_app(self, app, session=None, flask_sqlalchemy_db=None):
+    def init_app(self, app, session=None, flask_sqlalchemy_db=None,
+                 preprocessors=None, postprocessors=None):
         """Stores the specified :class:`flask.Flask` application object on
         which API endpoints will be registered and the
         :class:`sqlalchemy.orm.session.Session` object in which all database
@@ -171,9 +175,25 @@ class APIManager(object):
             db = SQLALchemy(app)
             apimanager.init_app(app, flask_sqlalchemy_db=db)
 
+        `postprocessors` and `preprocessors` must be dictionaries as described
+        in the section :ref:`processors`. These preprocessors and
+        postprocessors will be applied to all requests to and responses from
+        APIs created using this APIManager object. The preprocessors and
+        postprocessors given in these keyword arguments will be prepended to
+        the list of processors given for each individual model when using the
+        :meth:`create_api_blueprint` method (more specifically, the functions
+        listed here will be executed before any functions specified in the
+        :meth:`create_api_blueprint` method). For more information on using
+        preprocessors and postprocessors, see :ref:`processors`.
+
+        .. versionadded:: 0.13.0
+           Added the `preprocessors` and `postprocessors` keyword arguments.
+
         """
         self.app = app
         self.session = session or getattr(flask_sqlalchemy_db, 'session', None)
+        self.universal_preprocessors = preprocessors or {}
+        self.universal_postprocessors = postprocessors or {}
 
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
@@ -182,8 +202,9 @@ class APIManager(object):
                              include_methods=None, validation_exceptions=None,
                              results_per_page=10, max_results_per_page=100,
                              post_form_preprocessor=None,
-                             preprocessors=None, postprocessors=None):
-        """Creates an returns a ReSTful API interface as a blueprint, but does
+                             preprocessors=None, postprocessors=None,
+                             primary_key=None):
+        """Creates and returns a ReSTful API interface as a blueprint, but does
         not register it on any :class:`flask.Flask` application.
 
         The endpoints for the API for ``model`` will be available at
@@ -313,6 +334,15 @@ class APIManager(object):
         other code. For more information on preprocessors and postprocessors,
         see :ref:`processors`.
 
+        `primary_key` is a string specifying the name of the column of `model`
+        to use as the primary key for the purposes of creating URLs. If the
+        `model` has exactly one primary key, there is no need to provide a
+        value for this. If `model` has two or more primary keys, you must
+        specify which one to use.
+
+        .. versionadded:: 0.13.0
+           Added the `primary_key` keyword argument.
+
         .. versionadded:: 0.10.2
            Added the `include_methods` keyword argument.
 
@@ -370,15 +400,25 @@ class APIManager(object):
         instance_methods = \
             methods & frozenset(('GET', 'PATCH', 'DELETE', 'PUT'))
         # the base URL of the endpoints on which requests will be made
-        collection_endpoint = '/%s' % collection_name
+        collection_endpoint = '/{0}'.format(collection_name)
         # the name of the API, for use in creating the view and the blueprint
-        apiname = APIManager.APINAME_FORMAT % collection_name
+        apiname = APIManager.APINAME_FORMAT.format(collection_name)
+        # Prepend the universal preprocessors and postprocessors specified in
+        # the constructor of this class.
+        preprocessors_ = defaultdict(list)
+        postprocessors_ = defaultdict(list)
+        preprocessors_.update(preprocessors or {})
+        postprocessors_.update(postprocessors or {})
+        for key, value in self.universal_preprocessors.items():
+            preprocessors_[key] = value + preprocessors_[key]
+        for key, value in self.universal_postprocessors.items():
+            postprocessors_[key] = value + postprocessors_[key]
         # the view function for the API for this model
         api_view = API.as_view(apiname, self.session, model, exclude_columns,
                                include_columns, include_methods,
                                validation_exceptions, results_per_page,
                                max_results_per_page, post_form_preprocessor,
-                               preprocessors, postprocessors)
+                               preprocessors_, postprocessors_, primary_key)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = self._next_blueprint_name(apiname)
         # add the URL rules to the blueprint: the first is for methods on the
@@ -399,15 +439,16 @@ class APIManager(object):
                                view_func=api_view)
         # the per-instance endpoints will allow both integer and string primary
         # key accesses
-        instance_endpoint = '%s/<instid>' % (collection_endpoint)
+        instance_endpoint = '{0}/<instid>'.format(collection_endpoint)
         # For example, /api/person/1.
         blueprint.add_url_rule(instance_endpoint, methods=instance_methods,
                                defaults={'relationname': None,
                                          'relationinstid': None},
                                view_func=api_view)
         # add endpoints which expose related models
-        relation_endpoint = '%s/<relationname>' % (instance_endpoint)
-        relation_instance_endpoint = '%s/<relationinstid>' % relation_endpoint
+        relation_endpoint = '{0}/<relationname>'.format(instance_endpoint)
+        relation_instance_endpoint = \
+            '{0}/<relationinstid>'.format(relation_endpoint)
         # For example, /api/person/1/computers.
         blueprint.add_url_rule(relation_endpoint,
                                methods=possibly_empty_instance_methods,

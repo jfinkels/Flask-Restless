@@ -98,6 +98,17 @@ method::
 
 Then the API will be exposed at ``/api/people`` instead of ``/api/person``.
 
+Specifying one of many primary keys
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If your model has more than one primary key (one called ``id`` and one called
+``username``, for example), you should specify the one to use::
+
+    manager.create_api(User, primary_key='username')
+
+If you do this, Flask-Restless will create URLs like ``/api/user/myusername``
+instead of ``/api/user/137``.
+
 .. _allowpatchmany:
 
 Enable patching all instances
@@ -372,7 +383,7 @@ and `postprocessors` can be one of the following strings:
   model.
 * ``'PATCH_SINGLE'`` or ``'PUT_SINGLE'`` for requests to patch a single
   instance of the model.
-* ``'PATCH_MANY'`` or ``'PATCH_SINGLE'`` for requests to patch the entire
+* ``'PATCH_MANY'`` or ``'PUT_MANY'`` for requests to patch the entire
   collection of instances of the model.
 * ``'POST'`` for requests to post a new instance of the model.
 * ``'DELETE'`` for requests to delete an instance of the model.
@@ -393,6 +404,11 @@ be provided as keyword arguments, so you should always add ``**kw`` as the
 final argument when defining a preprocessor or postprocessor function. This
 way, you can specify only the keyword arguments you need when defining your
 functions.
+
+.. versionadded:: 0.13.0
+   Functions provided as postprocessors for ``GET_MANY`` and ``PATCH_MANY``
+   requests receive the ``search_params`` keyword argument, so that both
+   preprocessors and postprocessors have access to this information.
 
 * :http:method:`get` for a single instance::
 
@@ -419,10 +435,12 @@ functions.
           """
           pass
 
-      def get_many_postprocessor(result=None, **kw):
-          """Accepts a single argument, `result`, which is the dictionary
+      def get_many_postprocessor(result=None, search_params=None, **kw):
+          """Accepts two arguments, `result`, which is the dictionary
           representation of the JSON response which will be returned to the
-          client.
+          client, and `search_params`, which is a dictionary containing the
+          search parameters for the request (that produced the specified
+          `result`).
 
           """
           pass
@@ -455,11 +473,13 @@ functions.
           """
           pass
 
-      def patch_many_postprocessor(query=None, data=None, **kw):
-          """Accepts two arguments: `query`, which is the SQLAlchemy query
+      def patch_many_postprocessor(query=None, data=None, search_params=None,
+                                   **kw):
+          """Accepts three arguments: `query`, which is the SQLAlchemy query
           which was inferred from the search parameters in the query string,
-          and `data`, which is the dictionary representation of the JSON
-          response which will be returned to the client.
+          `data`, which is the dictionary representation of the JSON response
+          which will be returned to the client, and `search_params`, which is a
+          dictionary containing the search parameters for the request.
 
           """
           pass
@@ -515,13 +535,50 @@ authentication function can be implemented like this::
         # Next, check if the user is authorized to modify the specified
         # instance of the model.
         if not is_authorized_to_modify(current_user, instance_id):
-            raise ProcessingException(message='Not Authorized',
-                                      status_code=401)
+            raise ProcessingException(description='Not Authorized',
+                                      code=401)
     manager.create_api(Person, preprocessors=dict(GET_SINGLE=[check_auth]))
 
 The :exc:`ProcessingException` allows you to specify an HTTP status code for
 the generated response and an error message which the client will receive as
 part of the JSON in the body of the response.
+
+.. _universal:
+
+Universal preprocessors and postprocessors
+------------------------------------------
+
+.. versionadded:: 0.13.0
+
+The previous section describes how to specify a preprocessor or postprocessor
+on a per-API (that is, a per-model) basis. If you want a function to be
+executed for *all* APIs created by a :class:`APIManager`, you can use the
+``preprocessors`` or ``postprocessors`` keyword arguments in the constructor of
+the :class:`APIManager` class. These keyword arguments have the same format as
+the corresponding ones in the :meth:`APIManager.create_api` method as described
+above. Functions specified in this way are prepended to the list of
+preprocessors or postprocessors specified in the :meth:`APIManager.create_api`
+method.
+
+This may be used, for example, if all :http:method:`post` requests require
+authentication::
+
+    from flask import Flask
+    from flask.ext.restless import APIManager
+    from flask.ext.restless import ProcessingException
+    from flask.ext.login import current_user
+    from mymodels import User
+    from mymodels import session
+
+    def auth_func(*args, **kw):
+        if not current_user.is_authenticated():
+            raise ProcessingException(description='Not authenticated!', code=401)
+
+    app = Flask(__name__)
+    api_manager = APIManager(app, session=session,
+                             preprocessors=dict(POST=[auth_func]))
+    api_manager.create_api(User)
+
 
 Preprocessors for collections
 -----------------------------
@@ -551,6 +608,29 @@ filters* to the ``search_params`` keyword argument. For example::
 
     apimanager.create_api(Person, preprocessors=dict(GET_MANY=[preprocessor]))
 
+Custom queries
+--------------
+
+In cases where it is not possible to use preprocessors or postprocessors
+(:ref:`processors`) efficiently, you can provide a custom ``query`` attribute
+to your model instead. The attribute can either be a callable that returns a
+query::
+
+    class Person(Base):
+        __tablename__ = 'person'
+        id = Column(Integer, primary_key=True)
+
+        @classmethod
+        def query(cls):
+            return get_query_for_current_user(cls)
+
+or a SQLAlchemy query expression::
+
+    class Person(Base):
+        __tablename__ = 'person'
+        id = Column(Integer, primary_key=True)
+        query = get_some_query()
+
 .. _authentication:
 
 Requiring authentication for some methods
@@ -565,10 +645,10 @@ If you want certain HTTP methods to require authentication, use preprocessors::
     from flask.ext.login import current_user
     from mymodels import User
 
-    def auth_func(params):
+    def auth_func(*args, **kwargs):
         if not current_user.is_authenticated():
-            raise ProcessingException(message='Not authenticated!')
-        return NO_CHANGE
+            raise ProcessingException(description='Not authenticated!', code=401)
+        return True
 
     app = Flask(__name__)
     api_manager = APIManager(app)

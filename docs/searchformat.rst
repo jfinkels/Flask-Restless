@@ -40,7 +40,7 @@ Using `jQuery <http://jquery.com/>`_:
 
 .. sourcecode:: javascript
 
-   var filters = [{"name": "id", "op": "lte", "val": 5}];
+   var filters = [{"name": "id", "op": "like", "val": "%y%"}];
    $.ajax({
      url: 'http://127.0.0.1:5000/api/person',
      data: {"q": JSON.stringify({"filters": filters})},
@@ -281,7 +281,7 @@ error response is returned instead:
 
 .. sourcecode:: http
 
-   HTTP/1.1 400 Bad Request
+   HTTP/1.1 404 Bad Request
 
    {"message": "No result found"}
 
