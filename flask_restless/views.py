@@ -450,6 +450,7 @@ class API(ModelView):
                  validation_exceptions=None, results_per_page=10,
                  max_results_per_page=100, post_form_preprocessor=None,
                  preprocessors=None, postprocessors=None, primary_key=None,
+                 formatters=None,
                  *args, **kw):
         """Instantiates this view with the specified attributes.
 
@@ -584,6 +585,7 @@ class API(ModelView):
         self.preprocessors = defaultdict(list)
         self.postprocessors.update(upper_keys(postprocessors or {}))
         self.preprocessors.update(upper_keys(preprocessors or {}))
+        self.formatters = formatters
         # move post_form_preprocessor to preprocessors['POST'] for backward
         # compatibility
         if post_form_preprocessor:
@@ -864,7 +866,8 @@ class API(ModelView):
                            exclude_relations=self.exclude_relations,
                            include=self.include_columns,
                            include_relations=self.include_relations,
-                           include_methods=self.include_methods)
+                           include_methods=self.include_methods,
+                           formatters=self.formatters)
                    for x in instances[start:end]]
         return dict(page=page_num, objects=objects, total_pages=total_pages,
                     num_results=num_results)
@@ -890,7 +893,8 @@ class API(ModelView):
                        exclude_relations=self.exclude_relations,
                        include=self.include_columns,
                        include_relations=self.include_relations,
-                       include_methods=self.include_methods)
+                       include_methods=self.include_methods,
+                       formatters=self.formatters)
 
     def _instid_to_dict(self, instid):
         """Returns the dictionary representation of the instance specified by
@@ -1021,7 +1025,8 @@ class API(ModelView):
                              exclude_relations=self.exclude_relations,
                              include=self.include_columns,
                              include_relations=self.include_relations,
-                             include_methods=self.include_methods)
+                             include_methods=self.include_methods,
+                             formatters=self.formatters)
             # The URL at which a client can access the instance matching this
             # search query.
             url = '{0}/{1}'.format(request.base_url, result[primary_key])

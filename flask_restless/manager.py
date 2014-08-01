@@ -17,6 +17,8 @@ from flask import Blueprint
 
 from .views import API
 from .views import FunctionAPI
+import datetime
+import uuid
 
 #: The set of methods which are allowed by default when creating an API
 READONLY_METHODS = frozenset(('GET', ))
@@ -93,9 +95,9 @@ class APIManager(object):
     BLUEPRINTNAME_FORMAT = '{0}{1}'
 
     def __init__(self, app=None, session=None, flask_sqlalchemy_db=None,
-                 preprocessors=None, postprocessors=None):
+                 preprocessors=None, postprocessors=None, formatters=None):
         self.init_app(app, session, flask_sqlalchemy_db, preprocessors,
-                      postprocessors)
+                      postprocessors, formatters)
 
     def _next_blueprint_name(self, basename):
         """Returns the next name for a blueprint with the specified base name.
@@ -125,7 +127,7 @@ class APIManager(object):
         return APIManager.BLUEPRINTNAME_FORMAT.format(basename, next_number)
 
     def init_app(self, app, session=None, flask_sqlalchemy_db=None,
-                 preprocessors=None, postprocessors=None):
+                 preprocessors=None, postprocessors=None, formatters=None):
         """Stores the specified :class:`flask.Flask` application object on
         which API endpoints will be registered and the
         :class:`sqlalchemy.orm.session.Session` object in which all database
@@ -186,6 +188,15 @@ class APIManager(object):
         :meth:`create_api_blueprint` method). For more information on using
         preprocessors and postprocessors, see :ref:`processors`.
 
+        `formatters` must be a dictionary where keys are data types and values
+        are functions that serialize the values and return strings. For example::
+
+            import datetime
+        
+            formatters = {
+                datetime.date: lambda d: d.strftime("%d-%m-%Y")
+            }
+
         .. versionadded:: 0.13.0
            Added the `preprocessors` and `postprocessors` keyword arguments.
 
@@ -194,6 +205,14 @@ class APIManager(object):
         self.session = session or getattr(flask_sqlalchemy_db, 'session', None)
         self.universal_preprocessors = preprocessors or {}
         self.universal_postprocessors = postprocessors or {}
+        default_date_formatter = lambda x: x.isoformat()
+        self.universal_formatters = {
+            datetime.time: default_date_formatter,
+            datetime.date: default_date_formatter,
+            datetime.datetime: default_date_formatter,
+            uuid.UUID: lambda x: str(x)
+        }
+        self.universal_formatters.update(formatters or {})
 
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
@@ -418,7 +437,8 @@ class APIManager(object):
                                include_columns, include_methods,
                                validation_exceptions, results_per_page,
                                max_results_per_page, post_form_preprocessor,
-                               preprocessors_, postprocessors_, primary_key)
+                               preprocessors_, postprocessors_, primary_key,
+                               self.universal_formatters)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = self._next_blueprint_name(apiname)
         # add the URL rules to the blueprint: the first is for methods on the

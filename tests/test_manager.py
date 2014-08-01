@@ -353,6 +353,7 @@ class TestAPIManager(TestSupport):
         data = loads(response.data)
         assert 'first_computer' in data
         assert 'foo' == data['first_computer']['name']
+        assert computer.buy_date.isoformat() == data['first_computer']['buy_date']
 
     def test_exclude_columns(self):
         """Tests that the ``exclude_columns`` argument specifies which columns
@@ -594,6 +595,31 @@ class TestAPIManager(TestSupport):
         self.app.get('/api/computer')
         self.app.get('/api/person')
         assert precount == postcount == 3
+
+    def test_custom_formatters(self):
+        """Tests that objects are serialized when returned from a method listed
+        in the `include_methods` argument.
+
+        """
+        custom_format = "%d-%m-%y %H:%M:%S"
+        self.manager.init_app(self.flaskapp, self.session, formatters={
+            datetime.datetime: lambda x: x.strftime(custom_format)
+        })
+        date = datetime.date(1999, 12, 31)
+        person = self.Person(name=u'Test', age=10, other=20, birth_date=date)
+        computer = self.Computer(name=u'foo', vendor=u'bar', buy_date=date)
+        self.session.add(person)
+        person.computers.append(computer)
+        self.session.commit()
+
+        self.manager.create_api(self.Person,
+                                include_methods=['first_computer'])
+        response = self.app.get('/api/person/1')
+        assert 200 == response.status_code
+        data = loads(response.data)
+        assert 'first_computer' in data
+        assert 'foo' == data['first_computer']['name']
+        assert computer.buy_date.strftime(custom_format) == data['first_computer']['buy_date']
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
