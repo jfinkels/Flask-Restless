@@ -188,6 +188,15 @@ class APIManager(object):
         :meth:`create_api_blueprint` method). For more information on using
         preprocessors and postprocessors, see :ref:`processors`.
 
+        `formatters` must be a dictionary where keys are data types and values
+        are functions that serialize the values and return strings. For example::
+
+            import datetime
+        
+            formatters = {
+                datetime.date: lambda d: d.strftime("%d-%m-%Y")
+            }
+
         .. versionadded:: 0.13.0
            Added the `preprocessors` and `postprocessors` keyword arguments.
 
