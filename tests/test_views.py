@@ -153,7 +153,7 @@ class TestFSAModel(FlaskTestBase):
         data = loads(response.data)
         assert not isinstance(data['owner'], list)
         assert owner.id == data['ownerid']
-        
+
         # create a lazy user with two lazy pets
         owner = self.LazyUser()
         pet1 = self.LazyPet()
