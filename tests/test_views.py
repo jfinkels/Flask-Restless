@@ -79,6 +79,13 @@ class TestFSAModel(FlaskTestBase):
             id = db.Column(db.Integer, primary_key=True)
             ownerid = db.Column(db.Integer, db.ForeignKey(User.id))
             owner = db.relationship(User, backref=db.backref('pets'))
+            
+            @hybrid_property
+            def owner_id_using_hybrid(self):
+                if self.owner:
+                    return self.owner.id
+                else:
+                    return None
 
         class LazyUser(db.Model):
             id = db.Column(db.Integer, primary_key=True)
@@ -146,7 +153,7 @@ class TestFSAModel(FlaskTestBase):
         data = loads(response.data)
         assert not isinstance(data['owner'], list)
         assert owner.id == data['ownerid']
-
+        
         # create a lazy user with two lazy pets
         owner = self.LazyUser()
         pet1 = self.LazyPet()
