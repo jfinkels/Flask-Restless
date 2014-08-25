@@ -88,7 +88,7 @@ class TestFSAModel(FlaskTestBase):
                     return None
             @hybrid_owner_id.expression
             def hybrid_owner_id(cls):
-                return self.ownerid
+                return cls.ownerid
 
         class LazyUser(db.Model):
             id = db.Column(db.Integer, primary_key=True)
