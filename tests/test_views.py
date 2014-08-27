@@ -79,6 +79,16 @@ class TestFSAModel(FlaskTestBase):
             id = db.Column(db.Integer, primary_key=True)
             ownerid = db.Column(db.Integer, db.ForeignKey(User.id))
             owner = db.relationship(User, backref=db.backref('pets'))
+            
+            @hybrid_property
+            def hybrid_owner_id(self):
+                if self.owner:
+                    return self.owner.id
+                else:
+                    return None
+            @hybrid_owner_id.expression
+            def hybrid_owner_id(cls):
+                return cls.ownerid
 
         class LazyUser(db.Model):
             id = db.Column(db.Integer, primary_key=True)
