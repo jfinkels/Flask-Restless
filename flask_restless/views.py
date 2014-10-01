@@ -53,7 +53,6 @@ from .helpers import get_columns
 from .helpers import get_or_create
 from .helpers import get_related_model
 from .helpers import get_relations
-from .helpers import has_field
 from .helpers import is_like_list
 from .helpers import partition
 from .helpers import primary_key_name
@@ -1212,7 +1211,7 @@ class API(ModelView):
         # Check for any request parameter naming a column which does not exist
         # on the current model.
         for field in data:
-            if not has_field(self.model, field):
+            if not hasattr(self.model, field):
                 msg = "Model does not have field '{0}'".format(field)
                 return dict(message=msg), 400
 
@@ -1232,7 +1231,11 @@ class API(ModelView):
         try:
             # Instantiate the model with the parameters.
             modelargs = dict([(i, data[i]) for i in props])
-            instance = self.model(**modelargs)
+            try:
+                instance = self.model(**modelargs)
+            except AttributeError:
+                self.session.rollback()
+                return dict(message="Unable to create model instance"), 400
 
             # Handling relations, a single level is allowed
             for col in set(relations).intersection(paramkeys):
@@ -1350,7 +1353,7 @@ class API(ModelView):
         # Check for any request parameter naming a column which does not exist
         # on the current model.
         for field in data:
-            if not has_field(self.model, field):
+            if not hasattr(self.model, field):
                 msg = "Model does not have field '{0}'".format(field)
                 return dict(message=msg), 400
 
@@ -1387,7 +1390,12 @@ class API(ModelView):
             if data:
                 for item in query.all():
                     for field, value in data.items():
-                        setattr(item, field, value)
+                        try:
+                            setattr(item, field, value)
+                        except AttributeError:
+                            self.session.rollback()
+                            msg = "Can't set attribute {0}'".format(field)
+                            return dict(message=msg), 400
                     num_modified += 1
             self.session.commit()
         except self.validation_exceptions as exception:
