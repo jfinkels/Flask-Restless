@@ -36,6 +36,26 @@ class TestProcessors(TestSupport):
         # to facilitate searching
         self.app.search = lambda url, q: self.app.get(url + '?q={0}'.format(q))
 
+    def test_processing_exception_additional_messages(self):
+        """Tests the optional additional_messages attribute of
+        ProcessingException class
+        """
+
+        def custom_error(**kw):
+            errors = {'errors': {'username': ['Already exists.'],
+                                 'email': ['Not a valid email address.']}}
+            raise ProcessingException(code=422, description='Validation Errors',
+                                      additional_messages=errors)
+        pre = dict(POST=[custom_error])
+        self.manager.create_api(self.Person, methods=['POST'],
+                                preprocessors=pre)
+        response = self.app.post('/api/person', data=dumps({'name': u'test'}))
+        assert response.status_code == 422
+        data = loads(response.data)
+        assert data['message'] == 'Validation Errors'
+        assert data['errors']['username'][0] == 'Already exists.'
+        assert data['errors']['email'][0] == 'Not a valid email address.'
+
     def test_get_single_preprocessor(self):
         """Tests :http:method:`get` requests for a single object with
         a preprocessor function.
