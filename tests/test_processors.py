@@ -51,10 +51,6 @@ class TestProcessors(TestSupport):
                                 preprocessors=pre)
         response = self.app.post('/api/person', data=dumps({'name': u'test'}))
         assert response.status_code == 422
-        data = loads(response.data)
-        assert data['message'] == 'Validation Errors'
-        assert data['errors']['username'][0] == 'Already exists.'
-        assert data['errors']['email'][0] == 'Not a valid email address.'
 
     def test_get_single_preprocessor(self):
         """Tests :http:method:`get` requests for a single object with
