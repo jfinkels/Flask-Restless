@@ -146,6 +146,31 @@ def catch_processing_exceptions(func):
     return decorator
 
 
+def http_exception_json_response(ex):
+    """ Convert werkzeug http exceptions into a JSON response.
+
+    `ex` is an Exception raised by `werkzueg.exceptions`.
+
+    By default werkzueg exceptions are returned in HTML format. This can
+    pose a problem for RestFul api's since the client will be expecting
+    JSON formatted responses. Werkzueg exceptions are catched by assigning
+    this function to `flask.Flask.error_handler_spec` with a list of error
+    codes. As a result all unhandled http exceptions will be converted
+    into a JSON format.
+
+    See http://flask.pocoo.org/docs/0.10/api/#flask.Flask.error_handler_spec
+    for more details.
+    """
+    response = jsonify(message=str(ex))
+    if isinstance(ex, HTTPException):
+        for header in ex.get_response().headers:
+            if header[0] == 'Allow':
+                response.headers['Allow'] = header[1]
+    response.status_code = (ex.code if isinstance(ex, HTTPException) else 500)
+    current_app.logger.exception(str(ex))
+    return response
+
+
 def set_headers(response, headers):
     """Sets the specified headers on the specified response.
 

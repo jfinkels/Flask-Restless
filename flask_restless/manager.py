@@ -14,7 +14,8 @@
 from collections import defaultdict
 
 from flask import Blueprint
-
+from werkzeug.exceptions import default_exceptions
+from .views import http_exception_json_response
 from .views import API
 from .views import FunctionAPI
 
@@ -194,6 +195,7 @@ class APIManager(object):
         self.session = session or getattr(flask_sqlalchemy_db, 'session', None)
         self.universal_preprocessors = preprocessors or {}
         self.universal_postprocessors = postprocessors or {}
+
 
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
@@ -490,3 +492,8 @@ class APIManager(object):
         """
         blueprint = self.create_api_blueprint(*args, **kw)
         self.app.register_blueprint(blueprint)
+        # override bulit in default exception handler to convert unhandled
+        # exceptions from html responses to json responses instead
+        for code in default_exceptions.keys():
+            self.app.error_handler_spec[None][code] = \
+                http_exception_json_response
