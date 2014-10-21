@@ -14,8 +14,10 @@
 from collections import defaultdict
 
 from flask import Blueprint
+
 from werkzeug.exceptions import default_exceptions
-from .views import http_exception_json_response
+from werkzeug.exceptions import HTTPException
+from .views import jsonify
 from .views import API
 from .views import FunctionAPI
 
@@ -195,7 +197,6 @@ class APIManager(object):
         self.session = session or getattr(flask_sqlalchemy_db, 'session', None)
         self.universal_preprocessors = preprocessors or {}
         self.universal_postprocessors = postprocessors or {}
-
 
     def create_api_blueprint(self, model, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
@@ -472,6 +473,40 @@ class APIManager(object):
                                    view_func=eval_api_view)
         return blueprint
 
+    def add_blueprint_error_handlers(self, blueprint):
+        """Applys custom error handlers to the blueprint via the
+        `flask.Flask.Blueprint.app_errorhandler' decorator.
+
+        A decorator is applied for each error code present in
+        `werkzeug.exceptions.default_exceptions`
+
+        By default werkzueg exceptions are returned in HTML format. This can
+        pose a problem for RESTful api's since the client will be expecting
+        JSON formatted responses. A decorator is applied for each error code
+        present in `werkzeug.exceptions.default_exceptions`. The custom
+        decorator will convert any exceptions raised by werkzeug into JSON
+        format.
+        """
+
+        for code in default_exceptions.keys():
+            @blueprint.app_errorhandler(code)
+            def http_exception_json_response(ex):
+                """ Convert werkzeug http exceptions into a JSON response.
+
+                `ex` is an Exception raised by `werkzueg.exceptions`.
+                """
+
+                response = jsonify(message=str(ex))
+                if isinstance(ex, HTTPException):
+                    for header in ex.get_response().headers:
+                        if header[0] == 'Allow':
+                            response.headers['Allow'] = header[1]
+                response.status_code = (ex.code
+                                        if isinstance(ex, HTTPException)
+                                        else 500)
+                self.app.logger.exception(str(ex))
+                return response
+
     def create_api(self, *args, **kw):
         """Creates and registers a ReSTful API blueprint on the
         :class:`flask.Flask` application specified in the constructor of this
@@ -491,9 +526,5 @@ class APIManager(object):
 
         """
         blueprint = self.create_api_blueprint(*args, **kw)
+        self.add_blueprint_error_handlers(blueprint)
         self.app.register_blueprint(blueprint)
-        # override bulit in default exception handler to convert unhandled
-        # exceptions from html responses to json responses instead
-        for code in default_exceptions.keys():
-            self.app.error_handler_spec[None][code] = \
-                http_exception_json_response
