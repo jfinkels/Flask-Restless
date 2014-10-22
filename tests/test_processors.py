@@ -37,15 +37,16 @@ class TestProcessors(TestSupport):
         self.app.search = lambda url, q: self.app.get(url + '?q={0}'.format(q))
 
     def test_processing_exception_additional_messages(self):
-        """Tests the optional additional_messages attribute of
-        ProcessingException class
+        """Tests the details paramater of
+        :class:`flask_restless.views.ProcessingException` class
+
         """
 
         def custom_error(**kw):
             errors = {'errors': {'username': ['Already exists.'],
                                  'email': ['Not a valid email address.']}}
-            raise ProcessingException(code=422, description='Validation Errors',
-                                      additional_messages=errors)
+            raise ProcessingException(code=422, details=errors,
+                                      description='Validation Errors')
         pre = dict(POST=[custom_error])
         self.manager.create_api(self.Person, methods=['POST'],
                                 preprocessors=pre)

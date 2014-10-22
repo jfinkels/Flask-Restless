@@ -540,8 +540,9 @@ authentication function can be implemented like this::
     manager.create_api(Person, preprocessors=dict(GET_SINGLE=[check_auth]))
 
 The :exc:`ProcessingException` allows you to specify an HTTP status code for
-the generated response, an error message, and optionally additional messages
-which the client will receive as part of the JSON in the body of the response.
+the generated response, an error message, and a dictionary of additional
+details which the client will receive as part of the JSON in the body of
+the response.
 
 .. _universal:
 
