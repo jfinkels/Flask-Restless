@@ -145,15 +145,6 @@ def get_related_association_proxy_model(attr):
     return None
 
 
-def has_field(model, fieldname):
-    """Returns ``True`` if the `model` has the specified field, and it is not
-    a hybrid property.
-
-    """
-    return (hasattr(model, fieldname) and
-            not isinstance(getattr(model, fieldname), _BinaryExpression))
-
-
 def get_field_type(model, fieldname):
     """Helper which returns the SQLAlchemy type of the field.
     """
