@@ -141,7 +141,7 @@ The operator strings recognized by the API incude:
 * ``>=``, ``ge``, ``gte``, ``geq``, ``<=``, ``le``, ``lte``, ``leq``
 * ``in``, ``not_in``
 * ``is_null``, ``is_not_null``
-* ``like``
+* ``like``, ``not_like``
 * ``has``
 * ``any``
 
