@@ -17,7 +17,6 @@ import inspect
 
 from sqlalchemy import and_ as AND
 from sqlalchemy import or_ as OR
-from sqlalchemy import not_ as NOT
 from sqlalchemy.ext.associationproxy import AssociationProxy
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
@@ -100,7 +99,7 @@ OPERATORS = {
     'leq': lambda f, a: f <= a,
     'ilike': lambda f, a: f.ilike(a),
     'like': lambda f, a: f.like(a),
-    'not_like': lambda f, a: NOT(f.like(a)),
+    'not_like': lambda f, a: ~f.like(a),
     'in': lambda f, a: f.in_(a),
     'not_in': lambda f, a: ~f.in_(a),
     # Operators which accept three arguments.
