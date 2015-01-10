@@ -1058,6 +1058,17 @@ class API(ModelView):
         for preprocessor in self.preprocessors['GET_MANY']:
             preprocessor(search_params=search_params)
 
+        # resolve date-strings as required by the model
+        for param in search_params["filters"]:
+            try:
+                param["val"] = strings_to_dates(
+                    self.model,
+                    {param["name"]: param["val"]}
+                ).itervalues().next()
+            except ValueError as exception:
+                current_app.logger.exception(str(exception))
+                return dict(message='Unable to construct query'), 400
+
         # perform a filtered search
         try:
             result = search(self.session, self.model, search_params)
