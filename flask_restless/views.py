@@ -1077,10 +1077,11 @@ class API(ModelView):
                         query_model = get_related_association_proxy_model(submodel)
                         query_field = relation
                 try:
-                    param["val"] = strings_to_dates(
+                    result = strings_to_dates(
                         query_model,
                         {query_field: param["val"]}
-                    ).itervalues().next()
+                    )
+                    param["val"] = result.get(query_field)
                 except ValueError as exception:
                     current_app.logger.exception(str(exception))
                     return dict(message='Unable to construct query'), 400
