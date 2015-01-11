@@ -42,6 +42,8 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm.exc import MultipleResultsFound
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm.query import Query
+from sqlalchemy.orm.attributes import InstrumentedAttribute
+from sqlalchemy.ext.associationproxy import AssociationProxy
 from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import HTTPException
 from werkzeug.urls import url_quote_plus
@@ -62,6 +64,7 @@ from .helpers import session_query
 from .helpers import strings_to_dates
 from .helpers import to_dict
 from .helpers import upper_keys
+from .helpers import get_related_association_proxy_model
 from .search import create_query
 from .search import search
 
@@ -1059,15 +1062,28 @@ class API(ModelView):
             preprocessor(search_params=search_params)
 
         # resolve date-strings as required by the model
-        for param in search_params["filters"]:
-            try:
-                param["val"] = strings_to_dates(
-                    self.model,
-                    {param["name"]: param["val"]}
-                ).itervalues().next()
-            except ValueError as exception:
-                current_app.logger.exception(str(exception))
-                return dict(message='Unable to construct query'), 400
+        for param in search_params.get("filters", list()):
+            if all(key in param for key in ('name', 'val')):
+                query_model = self.model
+                query_field = param['name']
+
+                if '__' in param["name"]:
+                    fieldname, relation = param['name'].split('__')
+                    submodel = getattr(self.model, fieldname)
+                    if isinstance(submodel, InstrumentedAttribute):
+                        query_model = submodel.property.mapper.class_
+                        query_field = relation
+                    elif isinstance(submodel, AssociationProxy):
+                        query_model = get_related_association_proxy_model(submodel)
+                        query_field = relation
+                try:
+                    param["val"] = strings_to_dates(
+                        query_model,
+                        {query_field: param["val"]}
+                    ).itervalues().next()
+                except ValueError as exception:
+                    current_app.logger.exception(str(exception))
+                    return dict(message='Unable to construct query'), 400
 
         # perform a filtered search
         try:
