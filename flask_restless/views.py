@@ -1062,12 +1062,12 @@ class API(ModelView):
             preprocessor(search_params=search_params)
 
         # resolve date-strings as required by the model
-        for param in search_params.get("filters", list()):
-            if all(key in param for key in ('name', 'val')):
+        for param in search_params.get('filters', list()):
+            if 'name' in param and 'val' in param:
                 query_model = self.model
                 query_field = param['name']
 
-                if '__' in param["name"]:
+                if '__' in param['name']:
                     fieldname, relation = param['name'].split('__')
                     submodel = getattr(self.model, fieldname)
                     if isinstance(submodel, InstrumentedAttribute):
@@ -1079,9 +1079,9 @@ class API(ModelView):
                 try:
                     result = strings_to_dates(
                         query_model,
-                        {query_field: param["val"]}
+                        {query_field: param['val']}
                     )
-                    param["val"] = result.get(query_field)
+                    param['val'] = result.get(query_field)
                 except ValueError as exception:
                     current_app.logger.exception(str(exception))
                     return dict(message='Unable to construct query'), 400
