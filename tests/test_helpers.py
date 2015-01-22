@@ -231,6 +231,27 @@ class TestModelHelpers(TestSupport):
         assert 'first_computer' in data
         assert 'foo' == data['first_computer']['name']
 
+    def test_missing_method(self):
+        """Test missing attr is handled gracefully when parsing
+        include_methods"""
+
+        # When getting at data via an instance (/user/id/computer) and
+        # user has a 'include_method' set, to_dict errors when getattr
+        # runs on the computer instance, as it tries to include_method
+        # from user on computer object. Make sure this is handled
+        # gracefully (i.e. skipped)
+        # In this test we just use an invalid include_methods on
+        # computer as it generates the same error
+
+        person = self.Person(name='Test', age=10, other=20)
+        computer = self.Computer(name='foo')
+        person.computers.append(computer)
+
+        data = to_dict(computer, include_methods=['first_computer'])
+
+        assert 'first_computer' not in data
+
+
     def test_get_columns(self):
         """Test for getting the names of columns as strings."""
         columns = get_columns(self.Person)
