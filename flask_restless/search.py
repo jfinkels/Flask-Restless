@@ -128,6 +128,21 @@ class OrderBy(object):
         return '<OrderBy {0}, {1}>'.format(self.field, self.direction)
 
 
+class GroupBy(object):
+    """Represents an "order by" in a SQL query expression."""
+
+    def __init__(self, field):
+        """Instantiates this object with the specified attributes.
+
+        `field` is the name of the field by which to order the result set.
+        """
+        self.field = field
+
+    def __repr__(self):
+        """Returns a string representation of this object."""
+        return '<GroupBy {0}>'.format(self.field)
+
+
 class Filter(object):
     """Represents a filter to apply to a SQL query.
 
@@ -204,7 +219,7 @@ class SearchParameters(object):
     """
 
     def __init__(self, filters=None, limit=None, offset=None, order_by=None,
-                 junction=None):
+                 group_by=None, junction=None):
         """Instantiates this object with the specified attributes.
 
         `filters` is a list of :class:`Filter` objects, representing filters to
@@ -220,6 +235,10 @@ class SearchParameters(object):
         ordering directives to apply to the result set which matches the
         search.
 
+        `group_by` is a list of :class:`GroupBy` objects, representing the
+        groupin directives to apply to the result set which matches the
+        search.
+
         `junction` is either :func:`sqlalchemy.or_` or :func:`sqlalchemy.and_`
         (if ``None``, this will default to :func:`sqlalchemy.and_`), specifying
         how the filters should be interpreted (that is, as a disjunction or a
@@ -230,14 +249,16 @@ class SearchParameters(object):
         self.limit = limit
         self.offset = offset
         self.order_by = order_by or []
+        self.group_by = group_by or []
         self.junction = junction or AND
 
     def __repr__(self):
         """Returns a string representation of the search parameters."""
         template = ('<SearchParameters filters={0}, order_by={1}, limit={2},'
-                    ' offset={3}, junction={4}>')
+                    ' group_by={3}, offset={4}, junction={5}>')
         return template.format(self.filters, self.order_by, self.limit,
-                               self.offset, self.junction.__name__)
+                               self.group_by, self.offset,
+                               self.junction.__name__)
 
     @staticmethod
     def from_dictionary(dictionary):
@@ -249,6 +270,7 @@ class SearchParameters(object):
             {
               'filters': [{'name': 'age', 'op': 'lt', 'val': 20}, ...],
               'order_by': [{'field': 'age', 'direction': 'desc'}, ...]
+              'group_by': [{'field': 'age'}, ...]
               'limit': 10,
               'offset': 3,
               'disjunction': True
@@ -258,6 +280,8 @@ class SearchParameters(object):
         (in dictionary form), ``dictionary['order_by']`` is the list of
         :class:`OrderBy` objects (in dictionary form), ``dictionary['limit']``
         is the maximum number of matching entries to return,
+         ``dictionary['group_by']`` is the list of
+        :class:`GroupBy` objects (in dictionary form),
         ``dictionary['offset']`` is the number of initial entries to skip in
         the matching result set, and ``dictionary['disjunction']`` is whether
         the filters should be joined as a disjunction or conjunction.
@@ -271,12 +295,15 @@ class SearchParameters(object):
         filters = [from_dict(f) for f in dictionary.get('filters', [])]
         order_by_list = dictionary.get('order_by', [])
         order_by = [OrderBy(**o) for o in order_by_list]
+        group_by_list = dictionary.get('group_by', [])
+        group_by = [GroupBy(**o) for o in group_by_list]
         limit = dictionary.get('limit')
         offset = dictionary.get('offset')
         disjunction = dictionary.get('disjunction')
         junction = OR if disjunction else AND
         return SearchParameters(filters=filters, limit=limit, offset=offset,
-                                order_by=order_by, junction=junction)
+                                order_by=order_by, group_by=group_by,
+                                junction=junction)
 
 
 class QueryBuilder(object):
@@ -447,6 +474,12 @@ class QueryBuilder(object):
             query = query.limit(search_params.limit)
         if search_params.offset:
             query = query.offset(search_params.offset)
+
+        if search_params.group_by:
+            for val in search_params.group_by:
+                field = getattr(model, val.field)
+                query = query.group_by(field)
+
         return query
 
 
