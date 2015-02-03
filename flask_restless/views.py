@@ -89,15 +89,23 @@ class ProcessingException(HTTPException):
     the list will not be invoked.
 
     `status_code` is the HTTP status code of the response supplied to the
-    client in the case that this exception is raised. `message` is an error
-    message describing the cause of this exception. This message will appear in
-    the JSON object in the body of the response to the client.
+    client in the case that this exception is raised. `description` is an error
+    message describing the cause of this exception. `details` is a dictionary
+    containing additional messages to include in the JSON response. The
+    description and additional details will appear in the JSON object in
+    the body of the response to the client.
 
     """
-    def __init__(self, description='', code=400, *args, **kwargs):
+    def __init__(self, description='', code=400, details=None, *args, **kwargs):
         super(ProcessingException, self).__init__(*args, **kwargs)
         self.code = code
         self.description = description
+        self.details = details or {}
+
+    def json_response(self):
+        """Generates a JSON response for the Exception"""
+        message = self.description or str(self)
+        return jsonify(message=message, **self.details), self.code
 
 
 def _is_msie8or9():
@@ -146,9 +154,7 @@ def catch_processing_exceptions(func):
             return func(*args, **kw)
         except ProcessingException as exception:
             current_app.logger.exception(str(exception))
-            status = exception.code
-            message = exception.description or str(exception)
-            return jsonify(message=message), status
+            return exception.json_response()
     return decorator
 
 

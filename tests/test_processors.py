@@ -37,6 +37,23 @@ class TestProcessors(TestSupport):
         # to facilitate searching
         self.app.search = lambda url, q: self.app.get(url + '?q={0}'.format(q))
 
+    def test_processing_exception_additional_messages(self):
+        """Tests the details paramater of
+        :class:`flask_restless.views.ProcessingException` class
+
+        """
+
+        def custom_error(**kw):
+            errors = {'errors': {'username': ['Already exists.'],
+                                 'email': ['Not a valid email address.']}}
+            raise ProcessingException(code=422, details=errors,
+                                      description='Validation Errors')
+        pre = dict(POST=[custom_error])
+        self.manager.create_api(self.Person, methods=['POST'],
+                                preprocessors=pre)
+        response = self.app.post('/api/person', data=dumps({'name': u'test'}))
+        assert response.status_code == 422
+
     def test_get_single_preprocessor(self):
         """Tests :http:method:`get` requests for a single object with
         a preprocessor function.
