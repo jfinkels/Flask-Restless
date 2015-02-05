@@ -583,16 +583,18 @@ def strings_to_dates(model, dictionary):
     """
     result = {}
     for fieldname, value in dictionary.items():
-        if is_date_field(model, fieldname) and value is not None:
+        # Interval fields must be checked before date fields because Interval
+        # fields impl DateTimes.
+        if (is_interval_field(model, fieldname) and value is not None and
+                isinstance(value, int)):
+            result[fieldname] = datetime.timedelta(seconds=value)
+        elif is_date_field(model, fieldname) and value is not None:
             if value.strip() == '':
                 result[fieldname] = None
             elif value in CURRENT_TIME_MARKERS:
                 result[fieldname] = getattr(func, value.lower())()
             else:
                 result[fieldname] = parse_datetime(value)
-        elif (is_interval_field(model, fieldname) and value is not None
-              and isinstance(value, int)):
-            result[fieldname] = datetime.timedelta(seconds=value)
         else:
             result[fieldname] = value
     return result
