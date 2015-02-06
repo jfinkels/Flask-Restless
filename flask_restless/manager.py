@@ -20,6 +20,8 @@ from flask import Blueprint
 from .views import API
 from .views import FunctionAPI
 
+from .helpers import primary_key_name
+
 #: The set of methods which are allowed by default when creating an API
 READONLY_METHODS = frozenset(('GET', ))
 
@@ -472,6 +474,15 @@ class APIManager(object):
             possibly_empty_instance_methods |= frozenset(('PATCH', 'PUT'))
         if allow_delete_many and 'DELETE' in methods:
             possibly_empty_instance_methods |= frozenset(('DELETE', ))
+
+        # Check that primary_key is included for no_instance_methods
+        if no_instance_methods:
+            pk_name = primary_key or primary_key_name(model)
+            if (include_columns and pk_name not in include_columns or
+                exclude_columns and pk_name in exclude_columns):
+                msg = ('The primary key must be included for APIs with POST.')
+                raise IllegalArgumentError(msg)
+
         # the base URL of the endpoints on which requests will be made
         collection_endpoint = '/{0}'.format(collection_name)
         # the name of the API, for use in creating the view and the blueprint
