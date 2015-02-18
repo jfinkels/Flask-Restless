@@ -19,12 +19,17 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import DateTime
+from sqlalchemy.types import Interval
+from sqlalchemy.types import TypeDecorator
 
 from flask.ext.restless.helpers import evaluate_functions
 from flask.ext.restless.helpers import get_by
 from flask.ext.restless.helpers import get_columns
 from flask.ext.restless.helpers import get_related_model
 from flask.ext.restless.helpers import get_relations
+from flask.ext.restless.helpers import is_date_field
+from flask.ext.restless.helpers import is_interval_field
 from flask.ext.restless.helpers import is_like_list
 from flask.ext.restless.helpers import partition
 from flask.ext.restless.helpers import primary_key_name
@@ -323,3 +328,29 @@ class TestFunctionEvaluation(TestSupportPrefilled):
         functions = [{'name': 'bogus', 'field': 'age'}]
         assert_raises(OperationalError, evaluate_functions, self.session,
                       self.Person, functions)
+
+
+class TestFieldChecksHandleTypeDecorators(DatabaseTestBase):
+
+    class DateTimeDecorator(TypeDecorator):
+        impl = DateTime
+
+    class IntervalDecorator(TypeDecorator):
+        impl = Interval
+
+    def setUp(self):
+        super(TestFieldChecksHandleTypeDecorators, self).setUp()
+
+        class Test(self.Base):
+            __tablename__ = 'test'
+            id = Column(Integer, primary_key=True)
+            datetime = Column(self.DateTimeDecorator)
+            interval = Column(self.IntervalDecorator)
+
+        self.Test = Test
+
+    def test_is_date_field_traverses_impls(self):
+        assert is_date_field(self.Test, 'datetime')
+
+    def test_is_interval_field_traverses_impls(self):
+        assert is_interval_field(self.Test, 'interval')

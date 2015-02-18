@@ -180,10 +180,33 @@ def is_date_field(model, fieldname):
     """Returns ``True`` if and only if the field of `model` with the specified
     name corresponds to either a :class:`datetime.date` object or a
     :class:`datetime.datetime` object.
-
     """
-    fieldtype = get_field_type(model, fieldname)
-    return isinstance(fieldtype, Date) or isinstance(fieldtype, DateTime)
+    is_datelike = lambda field_type: isinstance(field_type, Date) or \
+        isinstance(field_type, DateTime)
+    return iteratively_check_parent_is_of_field(
+        model,
+        fieldname,
+        is_datelike
+    )
+
+
+def iteratively_check_parent_is_of_field(
+    model,
+    fieldname,
+    check_field_function
+):
+    """SQLAlchemy supports `TypeDecorators` of `TypeDecorators` following
+    version 0.9.9 so let's recursively check if the field_type matches our
+    `check_field_function`
+    """
+    field_type = get_field_type(model, fieldname)
+    while True:
+        if check_field_function(field_type):
+            return True
+        elif hasattr(field_type, 'impl'):
+            field_type = field_type.impl
+        else:
+            return False
 
 
 def is_interval_field(model, fieldname):
@@ -191,8 +214,12 @@ def is_interval_field(model, fieldname):
     name corresponds to a :class:`datetime.timedelta` object.
 
     """
-    fieldtype = get_field_type(model, fieldname)
-    return isinstance(fieldtype, Interval)
+    is_interval_field = lambda field_type: isinstance(field_type, Interval)
+    return iteratively_check_parent_is_of_field(
+        model,
+        fieldname,
+        is_interval_field
+    )
 
 
 def assign_attributes(model, **kwargs):
@@ -556,16 +583,18 @@ def strings_to_dates(model, dictionary):
     """
     result = {}
     for fieldname, value in dictionary.items():
-        if is_date_field(model, fieldname) and value is not None:
+        # Interval fields must be checked before date fields because Interval
+        # fields impl DateTimes.
+        if (is_interval_field(model, fieldname) and value is not None and
+                isinstance(value, int)):
+            result[fieldname] = datetime.timedelta(seconds=value)
+        elif is_date_field(model, fieldname) and value is not None:
             if value.strip() == '':
                 result[fieldname] = None
             elif value in CURRENT_TIME_MARKERS:
                 result[fieldname] = getattr(func, value.lower())()
             else:
                 result[fieldname] = parse_datetime(value)
-        elif (is_interval_field(model, fieldname) and value is not None
-              and isinstance(value, int)):
-            result[fieldname] = datetime.timedelta(seconds=value)
         else:
             result[fieldname] = value
     return result
