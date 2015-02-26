@@ -243,6 +243,9 @@ class TestOperators(TestSupportPrefilled):
         d = dict(filters=[dict(name='name', op='ilike', val=u'%Y%')])
         result = search(self.session, self.Person, d)
         assert result.count() == 3
+        d = dict(filters=[dict(name='name', op='not_like', val=u'%y%')])
+        result = search(self.session, self.Person, d)
+        assert result.count() == 2
         d = dict(filters=[dict(name='age', op='in', val=[19, 21, 23])])
         result = search(self.session, self.Person, d)
         assert result.count() == 2
