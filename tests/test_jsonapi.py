@@ -250,7 +250,7 @@ class TestDocumentStructure(ManagerTestBase):
         linked = document['linked']
         # Sort the links on their IDs, then get the two linked articles.
         linked_article1, linked_article2 = sorted(linked,
-                                                    key=lambda c: c['id'])
+                                                  key=lambda c: c['id'])
         assert linked_article1['type'] == 'article'
         assert linked_article1['id'] == '1'
         assert linked_article2['type'] == 'article'

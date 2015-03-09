@@ -31,12 +31,11 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
-from sqlalchemy.orm.collections import attribute_mapped_collection
+from sqlalchemy.orm.collections import attribute_mapped_collection as amc
 
 from flask.ext.restless import CONTENT_TYPE
 
 from .helpers import dumps
-from .helpers import loads
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
 from .helpers import ManagerTestBase
@@ -102,6 +101,7 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
+
         # datetime.time objects are not serializable by default so we need to
         # create a custom JSON encoder class.
         class TimeEncoder(JSONEncoder):
@@ -112,7 +112,7 @@ class TestUpdating(ManagerTestBase):
         bedtime = datetime.now().time()
         data = dict(data=dict(type='person', id='1', bedtime=bedtime))
         response = self.app.put('/api/person/1', data=dumps(data,
-                                                             cls=TimeEncoder))
+                                                            cls=TimeEncoder))
         assert response.status_code == 204
         assert person.bedtime == bedtime
 
@@ -309,6 +309,7 @@ class TestUpdating(ManagerTestBase):
         self.session.commit()
         data = dict(data=dict(type='interval', id='1', length=4))
         response = self.app.put('/api/interval/1', data=dumps(data))
+        assert response.status_code == 204
         assert interval.start == 5
         assert interval.end == 9
         assert interval.radius == 2
@@ -843,11 +844,10 @@ class TestAssociationProxy(ManagerTestBase):
                                          creator=usercreator)
 
         # user_keywords = backref('user_keywords',
-        #                         collection_class=collection('special_key'),
+        #                         collection_class=amc('special_key'),
         #                         cascade='all, delete-orphan')
         user_keywords = backref('user_keywords',
-                                collection_class=collection('special_key'),
-                                cascade='all, delete-orphan')
+                                collection_class=amc('special_key'))
 
         class UserKeyword(self.Base):
             __tablename__ = 'user_keyword'
@@ -861,7 +861,6 @@ class TestAssociationProxy(ManagerTestBase):
         class Keyword(self.Base):
             __tablename__ = 'keyword'
             id = Column(Integer, primary_key=True)
-            #keyword = Column('keyword', String(64))
             keyword = Column(Unicode)
 
         self.Article = Article

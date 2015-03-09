@@ -14,15 +14,12 @@
     :license: GNU AGPLv3+ or BSD
 
 """
-from flask import json
 from sqlalchemy import Column
 from sqlalchemy import Integer
-from sqlalchemy import Unicode
 
 from flask.ext.restless import CONTENT_TYPE
 
 from .helpers import dumps
-from .helpers import loads
 from .helpers import ManagerTestBase
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA

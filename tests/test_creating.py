@@ -475,7 +475,9 @@ class TestAssociationProxy(ManagerTestBase):
         data = dict(data=dict(type='article', tag_names=['foo', 'bar']))
         response = self.app.post('/api/article', data=dumps(data))
         assert response.status_code == 201
-        assert ['foo', 'bar'] == article.tag_names
+        document = loads(response.data)
+        article = document['data']
+        assert ['foo', 'bar'] == article['tag_names']
 
     def test_dictionary_collection(self):
         """Tests for creating a resource with a dictionary based collection via

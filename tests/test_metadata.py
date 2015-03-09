@@ -12,7 +12,6 @@
 from sqlalchemy import Column
 from sqlalchemy import Integer
 
-from .helpers import dumps
 from .helpers import loads
 from .helpers import ManagerTestBase
 

@@ -14,7 +14,6 @@
     :license: GNU AGPLv3+ or BSD
 
 """
-from datetime import date
 from datetime import datetime
 from datetime import time
 
