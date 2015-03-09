@@ -1406,6 +1406,7 @@ class API(APIBase):
                 return error_response(400, detail=detail)
             # If the page size is 0, just return everything.
             if page_size == 0:
+                num_results = count(self.session, result)
                 headers = dict()
                 result = [self.serialize(instance, only=fields)
                           for instance in result]
@@ -1538,7 +1539,7 @@ class API(APIBase):
                 related_value_instance = get_by(self.session, related_model,
                                                 relationinstid)
                 if related_value_instance is None:
-                    return {_STATUS: 404}, 404
+                    return error_response(404)
                 result = self.serialize(related_value_instance,
                                         fields_for_this)
             else:
@@ -1554,7 +1555,7 @@ class API(APIBase):
                 else:
                     result = self.serialize(related_value, fields_for_this)
         if result is None:
-            return {_STATUS: 404}, 404
+            return error_response(404)
         # Wrap the result
         result = dict(data=result)
         # Add any links requested to be included by URL parameters.
@@ -1643,7 +1644,7 @@ class API(APIBase):
         # If any of the instances was not found, return a 404 for the whole
         # request.
         if any(status == 404 for data, status in result):
-            return {_STATUS: 404}, 404
+            return error_response(404)
         # HACK This should really not be necessary.
         #
         # Collect all the instances into a single list and wrap the collection
@@ -1693,7 +1694,7 @@ class API(APIBase):
             filters = json.loads(request.args.get('filter[objects]', '[]'))
         except (TypeError, ValueError, OverflowError) as exception:
             current_app.logger.exception(str(exception))
-            return dict(message='Unable to decode search query'), 400
+            return error_response(400, detail='Unable to decode search query')
 
         for preprocessor in self.preprocessors['DELETE_MANY']:
             preprocessor(filters=filters)
@@ -1711,12 +1712,12 @@ class API(APIBase):
             result = search(self.session, self.model, filters,
                             _ignore_order_by=True)
         except NoResultFound:
-            return dict(message='No result found'), 404
+            return error_response(404, detail='No result found')
         except MultipleResultsFound:
-            return dict(message='Multiple results found'), 400
+            return error_response(404, detail='Multiple results found')
         except Exception as exception:
             current_app.logger.exception(str(exception))
-            return dict(message='Unable to construct query'), 400
+            return error_response(400, detail='Unable to construct query')
 
         # for security purposes, don't transmit list as top-level JSON
         if isinstance(result, Query):
@@ -1778,8 +1779,8 @@ class API(APIBase):
         if relationname is not None:
             # If no such relation exists, return an error to the client.
             if not hasattr(inst, relationname):
-                msg = 'No such link: {0}'.format(relationname)
-                return dict(message=msg), 404
+                detail = 'No such link: {0}'.format(relationname)
+                return error_response(404, detail=detail)
             # If this is a delete of a one-to-many relationship, remove the
             # related instance.
             if relationinstid is not None:
@@ -1818,7 +1819,9 @@ class API(APIBase):
         self.session.commit()
         for postprocessor in self.postprocessors['DELETE_SINGLE']:
             postprocessor(was_deleted=was_deleted)
-        return {}, 204 if was_deleted else 404
+        if not was_deleted:
+            return error_response(404)
+        return {}, 204
 
     # def _create_single(self, data):
     #     # Getting the list of relations that will be added later
@@ -1880,7 +1883,7 @@ class API(APIBase):
             data = json.loads(request.get_data()) or {}
         except (BadRequest, TypeError, ValueError, OverflowError) as exception:
             current_app.logger.exception(str(exception))
-            return dict(message='Unable to decode data'), 400
+            return error_response(400, detail='Unable to decode data')
 
         # apply any preprocessors to the POST arguments
         for preprocessor in self.preprocessors['POST']:
@@ -1893,8 +1896,8 @@ class API(APIBase):
             instance = get_by(self.session, self.model, instid)
             # If no such relation exists, return an error to the client.
             if not hasattr(instance, relationname):
-                msg = 'No such link: {0}'.format(relationname)
-                return dict(message=msg), 404
+                detail = 'No such link: {0}'.format(relationname)
+                return error_response(404, detail=detail)
             related_model = get_related_model(self.model, relationname)
             relation = getattr(instance, relationname)
             # If it is -to-many relation, add to the existing list.
@@ -1911,10 +1914,10 @@ class API(APIBase):
             else:
                 # If there is already something there, return an error.
                 if relation is not None:
-                    msg = ('Cannot POST to a -to-one relationship that already'
-                           ' has a linked instance (with ID'
-                           ' {0})').format(relationinstid)
-                    return dict(message=msg), 400
+                    detail = ('Cannot POST to a -to-one relationship that'
+                              ' already has a linked instance (with ID'
+                              ' {0})').format(relationinstid)
+                    return error_response(400, detail=detail)
                 # Get the ID of the related model to which to set the link.
                 #
                 # TODO I don't know the collection name for the linked objects,
@@ -2059,8 +2062,8 @@ class API(APIBase):
             fields = data.keys()
         for field in fields:
             if not has_field(self.model, field):
-                msg = "Model does not have field '{0}'".format(field)
-                return dict(message=msg), 400
+                detail = "Model does not have field '{0}'".format(field)
+                return error_response(400, detail=detail)
 
         # if putmany:
         #     try:
@@ -2124,7 +2127,7 @@ class API(APIBase):
         except (BadRequest, TypeError, ValueError, OverflowError) as exception:
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
-            return dict(message='Unable to decode data'), 400
+            return error_response(400, detail='Unable to decode data')
         for preprocessor in self.preprocessors['PUT_SINGLE']:
             temp_result = preprocessor(instance_id=instid, data=data)
             # See the note under the preprocessor in the get() method.
@@ -2431,4 +2434,6 @@ class RelationshipAPI(APIBase):
         self.session.commit()
         for postprocessor in self.postprocessors['DELETE']:
             postprocessor(was_deleted=was_deleted)
-        return {}, 204 if was_deleted else 404
+        if not was_deleted:
+            return error_response(404)
+        return {}, 204
