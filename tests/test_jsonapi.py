@@ -12,6 +12,7 @@
     :license: GNU AGPLv3+ or BSD
 
 """
+import string
 from urllib.parse import urlparse
 from uuid import uuid1
 
@@ -82,16 +83,47 @@ class TestDocumentStructure(ManagerTestBase):
         assert 'errors' in data
 
     def test_no_other_top_level_keys(self):
-        """Tests that no there are no top-level keys in the response other than
-        the allowed ones.
+        """Tests that no there are no other alphanumeric top-level keys in the
+        response other than the allowed ones.
+
+        For more information, see the `Top Level`_ section of the JSON API
+        specification.
+
+        .. _Top Level: http://jsonapi.org/format/#document-structure-top-level
 
         """
         response = self.app.get('/api/person')
-        data = loads(response.data)
-        assert set(data) <= {'data', 'errors', 'links', 'linked', 'meta'}
+        document = loads(response.data)
+        allowed = {'data', 'errors', 'links', 'included', 'meta'}
+        alphanumeric = string.ascii_letters + string.digits
+        assert all(d in allowed or d[0] not in alphanumeric for d in document)
 
     def test_resource_attributes(self):
-        """Test that a resource has the required top-level keys."""
+        """Test that a resource has the required top-level keys.
+
+        For more information, see the `Resource Objects`_ section of the JSON
+        API specification.
+
+        .. _Resource Objects: http://jsonapi.org/format/#document-structure-resource-objects
+
+        """
+        article = self.Article(id=1)
+        self.session.add(article)
+        self.session.commit()
+        response = self.app.get('/api/article/1')
+        article = loads(response.data)['data']
+        assert 'author_id' not in article
+
+    def test_no_foreign_keys(self):
+        """By default, foreign keys should not appear in the representation of
+        a resource.
+
+        For more information, see the `Resource Objects`_ section of the JSON
+        API specification.
+
+        .. _Resource Objects: http://jsonapi.org/format/#document-structure-resource-objects
+
+        """
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
@@ -161,7 +193,7 @@ class TestDocumentStructure(ManagerTestBase):
         response = self.app.get('/api/article/1')
         article = loads(response.data)['data']
         # Get the related resource URL.
-        resource_url = article['links']['author']['resource']
+        resource_url = article['links']['author']['related']
         # The Flask test client doesn't need the `netloc` part of the URL.
         path = urlparse(resource_url).path
         # Fetch the resource at the related resource URL.
@@ -193,7 +225,7 @@ class TestDocumentStructure(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         # Get the related resource URL.
-        resource_url = person['links']['articles']['resource']
+        resource_url = person['links']['articles']['related']
         # The Flask test client doesn't need the `netloc` part of the URL.
         path = urlparse(resource_url).path
         # Fetch the resource at the related resource URL.
@@ -217,11 +249,29 @@ class TestDocumentStructure(ManagerTestBase):
         response = self.app.get('/api/person/1')
         person = loads(response.data)['data']
         articles = person['links']['articles']
-        # A link object must contain at least one of 'self', 'resource',
+        # A link object must contain at least one of 'self', 'related',
         # linkage to a compound document, or 'meta'.
         assert articles['self'].endswith('/api/person/1/links/articles')
-        assert articles['resource'].endswith('/api/person/1/articles')
+        assert articles['related'].endswith('/api/person/1/articles')
         # TODO should also include pagination links
+
+    def test_link_object_allowable_keys(self):
+        """Tests that only allowable keys exist in the link object.
+
+        For more information, see the `Resource Relationships`_ section of the
+        JSON API specification.
+
+        .. _Resource Relationships: http://jsonapi.org/format/#document-structure-resource-relationships
+
+        """
+        response = self.app.get('/api/person')
+        document = loads(response.data)
+        allowed = {'self', 'resource', 'type', 'id', 'meta', 'first', 'last',
+                   'next', 'prev'}
+        alphanumeric = string.ascii_letters + string.digits
+        for link_object in document['links'].values():
+            assert all(d in allowed or k[0] not in alphanumeric
+                       for k in link_object)
 
     def test_compound_document_to_many(self):
         """Tests for getting linked resources from a homogeneous to-many
@@ -247,7 +297,7 @@ class TestDocumentStructure(ManagerTestBase):
         articles = person['links']['articles']
         assert articles['type'] == 'article'
         assert ['1', '2'] == sorted(articles['ids'])
-        linked = document['linked']
+        linked = document['included']
         # Sort the links on their IDs, then get the two linked articles.
         linked_article1, linked_article2 = sorted(linked,
                                                   key=lambda c: c['id'])
@@ -278,7 +328,7 @@ class TestDocumentStructure(ManagerTestBase):
         author = article['links']['author']
         assert author['type'] == 'person'
         assert author['id'] == '1'
-        linked = document['linked']
+        linked = document['included']
         linked_person = linked[0]
         assert linked_person['type'] == 'person'
         assert linked_person['id'] == '1'
@@ -727,7 +777,7 @@ class TestFetchingResources(ManagerTestBase):
         person = document['data']
         articleids = person['links']['articles']['ids']
         assert articleids == ['1']
-        assert 'linked' not in document
+        assert 'included' not in document
 
     def test_set_default_inclusion(self):
         """Tests that the user can specify default compound document
@@ -751,7 +801,7 @@ class TestFetchingResources(ManagerTestBase):
         response = self.app.get('/api2/person/1')
         document = loads(response.data)
         person = document['data']
-        linked = document['linked']
+        linked = document['included']
         articleids = person['links']['articles']['ids']
         assert articleids == ['1']
         assert linked[0]['type'] == 'article'
@@ -778,7 +828,7 @@ class TestFetchingResources(ManagerTestBase):
         response = self.app.get('/api/person/1?include=articles')
         assert response.status_code == 200
         document = loads(response.data)
-        linked = document['linked']
+        linked = document['included']
         # If a client supplied an include request parameter, no other types of
         # objects should be included.
         assert all(c['type'] == 'article' for c in linked)
@@ -806,7 +856,7 @@ class TestFetchingResources(ManagerTestBase):
         document = loads(response.data)
         # Sort the linked objects by type; 'article' comes before 'comment'
         # lexicographically.
-        linked = sorted(document['linked'], key=lambda x: x['type'])
+        linked = sorted(document['included'], key=lambda x: x['type'])
         linked_article, linked_comment = linked
         assert linked_article['type'] == 'article'
         assert linked_article['id'] == '2'
@@ -904,7 +954,7 @@ class TestFetchingResources(ManagerTestBase):
         response = self.app.get(url)
         document = loads(response.data)
         person = document['data']
-        linked = document['linked']
+        linked = document['included']
         # We requested 'id', 'name', and 'articles'; 'id' and 'type' must
         # always be present, and 'articles' comes under a 'links' key.
         assert ['id', 'links', 'name', 'type'] == sorted(person)

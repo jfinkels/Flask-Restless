@@ -1566,8 +1566,8 @@ class API(APIBase):
                                         link_id) for link_id in linkids)
             # Determine which fields to include in the linked objects.
             fields_for_this = fields.get(link)
-            result['linked'].extend(self.serialize(x, only=fields_for_this)
-                                    for x in related_instances)
+            result['included'].extend(self.serialize(x, only=fields_for_this)
+                                      for x in related_instances)
         for postprocessor in self.postprocessors['GET_SINGLE']:
             postprocessor(result=result)
         return result, 200
@@ -1595,7 +1595,7 @@ class API(APIBase):
         else:  # toinclude is not None and self.default_includes is not None:
             toinclude = set(toinclude.split(',')) | self.default_includes
         ids_to_link = defaultdict(set)
-        result['linked'] = []
+        result['included'] = []
         # TODO we should reverse the nested-ness of these for loops:
         # toinclude is likely to be a small list, and `original` could be a
         # very large list, so the latter should be the outer loop.

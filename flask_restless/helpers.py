@@ -367,8 +367,8 @@ def to_dict(instance, only=None):
             link = result['links'][relation]
             link['self'] = url_for(model, primary_key_value(instance),
                                    relation, relationship=True)
-            link['resource'] = url_for(model, primary_key_value(instance),
-                                       relation)
+            link['related'] = url_for(model, primary_key_value(instance),
+                                      relation)
             # Get the related value so we can see if it is a to-many
             # relationship or a to-one relationship.
             related_value = getattr(instance, relation)
