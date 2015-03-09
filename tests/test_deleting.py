@@ -181,11 +181,9 @@ class TestDeleting(ManagerTestBase):
         """
         assert False, 'Not implemented'
 
-    def test_delete_absent_instance(self):
-        """Test that deleting an instance of the model which does not exist
-        fails.
-
-        This should give us a 404 when the object is not found.
+    def test_delete_nonexistent_instance(self):
+        """Tests that a request to delete a nonexistent resource yields a
+        :http:status:`404 response.
 
         """
         response = self.app.delete('/api/person/1')

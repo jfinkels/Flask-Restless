@@ -31,6 +31,7 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.collections import attribute_mapped_collection
 
 from flask.ext.restless import CONTENT_TYPE
 
@@ -312,6 +313,19 @@ class TestUpdating(ManagerTestBase):
         assert interval.end == 9
         assert interval.radius == 2
 
+    def test_nonexistent_field(self):
+        """Tests for an error response on a request to update a nonexistent
+        field.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        data = dict(data=dict(type='person', id=1, bogus=0))
+        response = self.put('/api/person/1', data=dumps(data))
+        assert response.status_code == 400
+        # TODO check the error message here
+
     # def test_content_type(self):
     #     """Tests that the server responds only to requests with a JSON
     #     Content-Type.
@@ -380,7 +394,7 @@ class TestUpdating(ManagerTestBase):
     #     programs = loads(response.data)['objects']
     #     assert programs[1]['program']['name'] == 'iMovie'
 
-    # TODO this is not required by the JSON API spec.
+    # TODO this is not required by the JSON API spec, but may be usable.
     #
     # def test_disallow_patch_many(self):
     #     """Tests that disallowing "patch many" requests responds with a
@@ -811,17 +825,50 @@ class TestAssociationProxy(ManagerTestBase):
             article = relationship(Article, backref=backref('articletags'))
             tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
             tag = relationship('Tag')
-            # extra_info = Column(Unicode)
 
         class Tag(self.Base):
             __tablename__ = 'tag'
             id = Column(Integer, primary_key=True)
             name = Column(Unicode)
 
+        # The code for the following three classes comes from the SQLAlchemy
+        # documentation
+        # http://docs.sqlalchemy.org/en/rel_0_9/orm/extensions/associationproxy.html#proxying-to-dictionary-based-collections
+        usercreator = lambda k, v: UserKeyword(special_key=k, keyword=v)
+
+        class User(self.Base):
+            __tablename__ = 'user'
+            id = Column(Integer, primary_key=True)
+            keywords = association_proxy('user_keywords', 'keyword',
+                                         creator=usercreator)
+
+        # user_keywords = backref('user_keywords',
+        #                         collection_class=collection('special_key'),
+        #                         cascade='all, delete-orphan')
+        user_keywords = backref('user_keywords',
+                                collection_class=collection('special_key'),
+                                cascade='all, delete-orphan')
+
+        class UserKeyword(self.Base):
+            __tablename__ = 'user_keyword'
+            special_key = Column(Unicode)
+            user_id = Column(Integer, ForeignKey('user.id'), primary_key=True)
+            user = relationship(User, backref=user_keywords)
+            keyword_id = Column(Integer, ForeignKey('keyword.id'),
+                                primary_key=True)
+            keyword = relationship('Keyword')
+
+        class Keyword(self.Base):
+            __tablename__ = 'keyword'
+            id = Column(Integer, primary_key=True)
+            #keyword = Column('keyword', String(64))
+            keyword = Column(Unicode)
+
         self.Article = Article
         self.Tag = Tag
         self.Base.metadata.create_all()
         self.manager.create_api(Article, methods=['PUT'])
+        self.manager.create_api(User, methods=['PUT'])
         # HACK Need to create APIs for these other models because otherwise
         # we're not able to create the link URLs to them.
         #
@@ -829,6 +876,8 @@ class TestAssociationProxy(ManagerTestBase):
         # which no API has been made.
         self.manager.create_api(Tag)
         self.manager.create_api(ArticleTag)
+        self.manager.create_api(UserKeyword)
+        self.manager.create_api(Keyword)
 
     def tearDown(self):
         """Drops all tables from the temporary database."""
@@ -863,50 +912,25 @@ class TestAssociationProxy(ManagerTestBase):
         assert response.status_code == 204
         assert set(article.tags) == {tag1, tag2}
 
-        # data = {
-        #     'programs': {
-        #         'add': [
-        #             {
-        #                 'program_id': 1,
-        #                 'licensed': False
-        #             }
-        #         ]
-        #     }
-        # }
-        # response = self.app.patch('/api/computer/1', data=dumps(data))
-        # computer = loads(response.data)
-        # assert 200 == response.status_code
-        # vim_relation = {
-        #     'computer_id': 1,
-        #     'program_id': 1,
-        #     'licensed': False
-        # }
-        # assert vim_relation in computer['programs']
-        # data = {
-        #     'programs': {
-        #         'add': [
-        #             {
-        #                 'program_id': 2,
-        #                 'licensed': True
-        #             }
-        #         ]
-        #     }
-        # }
-        # response = self.app.patch('/api/computer/1', data=dumps(data))
-        # computer = loads(response.data)
-        # assert 200 == response.status_code
-        # emacs_relation = {
-        #     'computer_id': 1,
-        #     'program_id': 2,
-        #     'licensed': True
-        # }
-        # assert emacs_relation in computer['programs']
-        # vim_relation = {
-        #     'computer_id': 1,
-        #     'program_id': 1,
-        #     'licensed': False
-        # }
-        # assert vim_relation in computer['programs']
+    def test_scalar(self):
+        """Tests for updating an association proxy to scalars as a list
+        attribute instead of a link object.
+
+        """
+        article = self.Article(id=1)
+        tag1 = self.Tag(name='foo')
+        tag2 = self.Tag(name='bar')
+        article.tags = [tag1, tag2]
+        self.session.add_all([article, tag1, tag2])
+        self.session.commit()
+        data = dict(data=dict(type='article', id=1, tag_names=['foo', 'bar']))
+        response = self.app.put('/api/article/1', data=dumps(data))
+        assert response.status_code == 204
+        assert ['foo', 'bar'] == article.tag_names
+
+    def test_dictionary_collection(self):
+        """Tests for updating a dictionary based collection."""
+        assert False, 'Not implemented'
 
     # def test_patch_remove_m2m(self):
     #     """Test for removing a relation on a model that uses an association

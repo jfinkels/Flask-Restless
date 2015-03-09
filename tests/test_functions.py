@@ -10,6 +10,11 @@
     :license: GNU AGPLv3+ or BSD
 
 """
+from sqlalchemy import Column
+from sqlalchemy import Integer
+
+from .helpers import dumps
+from .helpers import ManagerTestBase
 
 
 class TestFunctionEvaluation(ManagerTestBase):
@@ -22,7 +27,7 @@ class TestFunctionEvaluation(ManagerTestBase):
         :class:`testapp.Computer` models.
 
         """
-        super(TestFunctionAPI, self).setUp()
+        super(TestFunctionEvaluation, self).setUp()
 
         class Person(self.Base):
             __tablename__ = 'person'
@@ -55,9 +60,7 @@ class TestFunctionEvaluation(ManagerTestBase):
         assert response.status_code == 200
         document = loads(response.data)
         results = document['data']
-        assert results[0] == 45.0
-        assert results[1] == 15.0
-        assert results[2] == 3
+        assert [45.0, 15.0, 3] == results
 
     def test_no_query(self):
         """Tests that a request to the function evaluation endpoint with no
@@ -130,4 +133,4 @@ class TestFunctionEvaluation(ManagerTestBase):
         assert response.data.endswith(b')')
         document = loads(response.data[4:-1])
         results = document['data']
-        assert results[0] == 10.0
+        assert [10.0] == results

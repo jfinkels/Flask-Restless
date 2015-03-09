@@ -31,6 +31,8 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy import Time
 from sqlalchemy import Unicode
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 
@@ -70,15 +72,34 @@ class TestFetching(ManagerTestBase):
             birth_datetime = Column(DateTime)
             birthday = Column(Date)
 
+            @hybrid_property
+            def has_early_bedtime(self):
+                if hasattr(self, 'bedtime'):
+                    if self.bedtime is None:
+                        return False
+                    nine_oclock = time(21)
+                    return self.bedtime < nine_oclock
+                return False
+
         class Tag(self.Base):
             __tablename__ = 'tag'
             name = Column(Unicode, primary_key=True)
 
+        class Comment(self.Base):
+            __tablename__ = 'comment'
+            id = Column(Integer, primary_key=True)
+
+            @classmethod
+            def query(cls):
+                return self.session.query(cls).filter_by(cls.id < 2)
+
         self.Article = Article
+        self.Comment = Comment
         self.Person = Person
         self.Tag = Tag
         self.Base.metadata.create_all()
         self.manager.create_api(Article)
+        self.manager.create_api(Comment)
         self.manager.create_api(Person)
         self.manager.create_api(Tag)
 
@@ -121,21 +142,6 @@ class TestFetching(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         assert person['birthday'] == now.isoformat()
-
-    # def test_num_results(self):
-    #     """Tests that a request for (a subset of) all instances of a model
-    #     includes the total number of results as part of the JSON response.
-
-    #     """
-    #     self.manager.create_api(self.Person)
-    #     for i in range(15):
-    #         d = dict(name='person{0}'.format(i))
-    #         response = self.app.post('/api/person', data=dumps(d))
-    #         assert response.status_code == 201
-    #     response = self.app.get('/api/person')
-    #     assert response.status_code == 200
-    #     data = loads(response.data)
-    #     assert data['meta']['num_results'] == 15
 
     def test_alternate_primary_key(self):
         """Tests that models with primary keys that are not named ``id`` are
@@ -287,6 +293,36 @@ class TestFetching(ManagerTestBase):
                                 content_type=content_type)
         assert response.status_code == 200
 
+    def test_callable_query(self):
+        """Tests for making a query with a custom callable ``query`` attribute.
+
+        For more information, see pull request #133.
+
+        """
+        comment1 = self.Comment(id=1)
+        comment2 = self.Comment(id=2)
+        self.session.add_all([comment1, comment2])
+        self.session.commit()
+        response = self.app.get('/api/comment')
+        document = loads(response.data)
+        comments = document['data']
+        assert ['1'] == sorted(comment['id'] for comment in comments)
+
+    def test_hybrid_property(self):
+        """Tests for fetching a resource with a hybrid property attribute."""
+        person1 = self.Person(id=1, bedtime=time(20))
+        person2 = self.Person(id=2, bedtime=time(22))
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert person['has_early_bedtime']
+        response = self.app.get('/api/person/2')
+        document = loads(response.data)
+        person = document['data']
+        assert not person['has_early_bedtime']
+
 
 class TestDynamicRelationships(ManagerTestBase):
     """Tests for fetching resources from dynamic relationships."""
@@ -304,8 +340,8 @@ class TestDynamicRelationships(ManagerTestBase):
             __tablename__ = 'article'
             id = Column(Integer, primary_key=True)
             author_id = Column(Integer, ForeignKey('person.id'))
-            author = relationship('Person', backref=backref('articles',
-                                                            lazy='dynamic'))
+            author = relationship('Person', lazy='dynamic',
+                                  backref=backref('articles', lazy='dynamic'))
 
         class Person(self.Base):
             __tablename__ = 'person'
@@ -320,6 +356,23 @@ class TestDynamicRelationships(ManagerTestBase):
     def tearDown(self):
         """Drops all tables from the temporary database."""
         self.Base.metadata.drop_all()
+
+    def test_to_one(self):
+        """Tests for fetching a resource with a dynamic link to a to-one
+        relation.
+
+        """
+        article = self.Article(id=1)
+        person = self.Person(id=1)
+        article.author = person
+        self.session.add_all([article, person])
+        self.session.commit()
+        response = self.app.get('/api/article/1')
+        document = loads(response.data)
+        article = document['data']
+        links = article['links']
+        author = links['author']
+        assert author['id'] == '1'
 
     def test_to_many(self):
         """Tests for fetching a resource with a dynamic link to a to-many
@@ -338,7 +391,6 @@ class TestDynamicRelationships(ManagerTestBase):
         person = document['data']
         links = person['links']
         articles = links['articles']
-        print(articles)
         assert ['1', '2'] == sorted(articleid for articleid in articles['ids'])
 
     def test_to_many_resource_url(self):
@@ -357,6 +409,93 @@ class TestDynamicRelationships(ManagerTestBase):
         document = loads(response.data)
         articles = document['data']
         assert ['1', '2'] == sorted(article['id'] for article in articles)
+
+
+class TestAssociationProxy(ManagerTestBase):
+    """Tests for getting an object with a relationship using an association
+    proxy.
+
+    """
+
+    def setUp(self):
+        """Creates the database, the :class:`~flask.Flask` object, the
+        :class:`~flask.ext.restless.manager.APIManager` for that application,
+        and creates the ReSTful API endpoints for the models used in the test
+        methods.
+
+        """
+        super(TestAssociationProxy, self).setUp()
+
+        class Article(self.Base):
+            __tablename__ = 'article'
+            id = Column(Integer, primary_key=True)
+            tags = association_proxy('articletags', 'tag',
+                                     creator=lambda tag: ArticleTag(tag=tag))
+            tag_names = association_proxy('tags', 'name',
+                                          creator=lambda name: Tag(name=name))
+
+        class ArticleTag(self.Base):
+            __tablename__ = 'articletag'
+            article_id = Column(Integer, ForeignKey('article.id'),
+                                primary_key=True)
+            article = relationship(Article, backref=backref('articletags'))
+            tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
+            tag = relationship('Tag')
+            # extra_info = Column(Unicode)
+
+        class Tag(self.Base):
+            __tablename__ = 'tag'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+
+        self.Article = Article
+        self.Tag = Tag
+        self.Base.metadata.create_all()
+        self.manager.create_api(Article)
+        # HACK Need to create APIs for these other models because otherwise
+        # we're not able to create the link URLs to them.
+        #
+        # TODO Fix this by simply not creating links to related models for
+        # which no API has been made.
+        self.manager.create_api(Tag)
+        self.manager.create_api(ArticleTag)
+
+    def tearDown(self):
+        """Drops all tables from the temporary database."""
+        self.Base.metadata.drop_all()
+
+    def test_fetch(self):
+        """Test for fetching a resource that has a many-to-many relation that
+        uses an association proxy.
+
+        """
+        article = self.Article(id=1)
+        tag = self.Tag(id=1)
+        article.tags.append(tag)
+        self.session.add_all([article, tag])
+        self.session.commit()
+        response = self.app.get('/api/article/1')
+        document = loads(response.data)
+        article = document['data']
+        links = article['links']
+        tags = links['tags']
+        assert ['1'] == sorted(tags['ids'])
+
+    def test_scalar(self):
+        """Tests for fetching an association proxy to scalars as a list
+        attribute instead of a link object.
+
+        """
+        article = self.Article(id=1)
+        tag1 = self.Tag(name='foo')
+        tag2 = self.Tag(name='bar')
+        article.tags = [tag1, tag2]
+        self.session.add_all([article, tag1, tag2])
+        self.session.commit()
+        response = self.app.get('/api/article/1')
+        document = loads(response.data)
+        article = document['data']
+        assert ['bar', 'foo'] == sorted(article['tag_names'])
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')

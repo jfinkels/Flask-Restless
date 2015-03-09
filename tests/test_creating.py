@@ -449,15 +449,37 @@ class TestAssociationProxy(ManagerTestBase):
         information to be stored on the association table.
 
         """
-        tag = self.Tag(id=1)
-        self.session.add(tag)
+        tag1 = self.Tag(id=1)
+        tag2 = self.Tag(id=2)
+        self.session.add_all([tag1, tag2])
         self.session.commit()
         data = dict(data=dict(type='article',
-                              links=dict(tags=dict(type='tags', ids=[1]))))
+                              links=dict(tags=dict(type='tags', ids=[1, 2]))))
         response = self.app.post('/api/article', data=dumps(data))
         assert response.status_code == 201
         document = loads(response.data)
         article = document['data']
         links = article['links']
         tags = links['tags']
-        assert ['1'] == sorted(tags['ids'])
+        assert ['1', '2'] == sorted(tags['ids'])
+
+    def test_scalar(self):
+        """Tests for creating a resource with an association proxy to scalars
+        as a list attribute instead of a link object.
+
+        """
+        tag1 = self.Tag(name='foo')
+        tag2 = self.Tag(name='bar')
+        self.session.add_all([tag1, tag2])
+        self.session.commit()
+        data = dict(data=dict(type='article', tag_names=['foo', 'bar']))
+        response = self.app.post('/api/article', data=dumps(data))
+        assert response.status_code == 201
+        assert ['foo', 'bar'] == article.tag_names
+
+    def test_dictionary_collection(self):
+        """Tests for creating a resource with a dictionary based collection via
+        an association proxy.
+
+        """
+        assert False, 'Not implemented'

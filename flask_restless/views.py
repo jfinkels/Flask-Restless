@@ -1307,13 +1307,15 @@ class API(APIBase):
         responses, see :ref:`searchformat`.
 
         """
-        # try:
-        #     # Get any sorting parameters commands.
-        #     sorting = json.loads(request.args.get('filters', '{}'))
-        # except (TypeError, ValueError, OverflowError) as exception:
-        #     current_app.logger.exception(str(exception))
-        #     detail = 'Unable to decode sorting data as JSON'
-        #     return error_response(400, detail=detail)
+        # Determine filtering options.
+        try:
+            filters = json.loads(request.args.get('filter[objects]', '[]'))
+        except (TypeError, ValueError, OverflowError) as exception:
+            current_app.logger.exception(str(exception))
+            detail = 'Unable to decode filter objects as JSON list'
+            return error_response(400, detail=detail)
+        # TODO fix this using the below
+        #filters = [strings_to_dates(self.model, f) for f in filters]
 
         # # resolve date-strings as required by the model
         # for param in search_params.get('filters', list()):
@@ -1338,17 +1340,6 @@ class API(APIBase):
         #             current_app.logger.exception(str(exception))
         #             return dict(message='Unable to construct query'), 400
         #         param['val'] = result.get(query_field)
-
-        # Determine filtering options.
-        try:
-            filters = json.loads(request.args.get('filter[objects]', '[]'))
-        except (TypeError, ValueError, OverflowError) as exception:
-            current_app.logger.exception(str(exception))
-            detail = 'Unable to decode filter objects as JSON list'
-            return error_response(400, detail=detail)
-        # TODO fix this
-        #filters = [strings_to_dates(self.model, f) for f in filters]
-
 
         # Determine sorting options.
         sort = request.args.get('sort')
@@ -1430,6 +1421,7 @@ class API(APIBase):
                 if hasattr(result, 'paginate'):
                     pagination = result.paginate(page_number, page_size,
                                                  error_out=False)
+                    num_results = pagination.total
                     first = 1
                     last = pagination.pages
                     prev = pagination.prev_num
@@ -1477,6 +1469,10 @@ class API(APIBase):
                                              if link is not None))
         # Otherwise, the result of the search was a single resource.
         else:
+            # (This is not a pretty solution.) Set number of results to
+            # ``None`` to indicate that the returned JSON metadata should not
+            # include a ``total`` key.
+            num_results = None
             primary_key = self.primary_key or primary_key_name(result)
             result = self.serialize(result, only=fields)
             # The URL at which a client can access the instance matching this
@@ -1502,6 +1498,7 @@ class API(APIBase):
         # the :func:`jsonpify` function has access to them. See the note there
         # for more information.
         result['meta'] = {_HEADERS: headers}
+        result['meta']['total'] = 1 if num_results is None else num_results
         return result, 200, headers
 
     def _get_single(self, instid, relationname=None, relationinstid=None):
