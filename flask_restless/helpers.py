@@ -11,6 +11,7 @@
 """
 import datetime
 import inspect
+from itertools import chain
 from urllib.parse import urljoin
 import uuid
 
@@ -26,6 +27,7 @@ from sqlalchemy.ext.associationproxy import AssociationProxy
 from sqlalchemy.ext import hybrid
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import ColumnProperty
+from sqlalchemy.orm import class_mapper
 from sqlalchemy.orm import RelationshipProperty as RelProperty
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.attributes import QueryableAttribute
@@ -147,6 +149,29 @@ def get_related_association_proxy_model(attr):
         if hasattr(prop, attribute):
             return getattr(prop, attribute).class_
     return None
+
+
+def foreign_key_columns(model):
+    """Returns a list of the :class:`sqlalchemy.Column` objects that contain
+    foreign keys for relationships in the specified model class.
+
+    """
+    try:
+        inspector = sqlalchemy_inspect(model)
+    except NoInspectionAvailable:
+        # Well, the inspection of a model class returns a mapper anyway, so
+        # let's just assume the inspection would have returned the mapper.
+        inspector = class_mapper(model)
+    all_columns = inspector.columns
+    return [c for c in all_columns if c.foreign_keys]
+
+
+def foreign_keys(model):
+    """Returns a list of the names of columns that contain foreign keys for
+    relationships in the specified model class.
+
+    """
+    return [column.name for column in foreign_key_columns(model)]
 
 
 def has_field(model, fieldname):
@@ -290,20 +315,25 @@ def to_dict(instance, only=None):
     model = type(instance)
     try:
         inspected_instance = sqlalchemy_inspect(model)
-        column_attrs = inspected_instance.column_attrs.keys()
-        descriptors = inspected_instance.all_orm_descriptors.items()
-        hybrid_columns = [k for k, d in descriptors
-                          if d.extension_type == hybrid.HYBRID_PROPERTY]
-        #and not (deep and k in deep)]
-        columns = column_attrs + hybrid_columns
     except NoInspectionAvailable:
         return instance
+    column_attrs = inspected_instance.column_attrs.keys()
+    descriptors = inspected_instance.all_orm_descriptors.items()
+    # hybrid_columns = [k for k, d in descriptors
+    #                   if d.extension_type == hybrid.HYBRID_PROPERTY
+    #                   and not (deep and k in deep)]
+    hybrid_columns = [k for k, d in descriptors
+                      if d.extension_type == hybrid.HYBRID_PROPERTY]
+    columns = column_attrs + hybrid_columns
     # Exclude column names that are blacklisted.
     columns = (c for c in columns
                if not c.startswith('__') and c not in COLUMN_BLACKLIST)
     # If `only` is a list, only include those columns that are in the list.
     if only is not None:
         columns = (c for c in columns if c in only)
+    # Exclude column names that are foreign keys.
+    foreign_key_columns = foreign_keys(model)
+    columns = (c for c in columns if c not in foreign_key_columns)
     # Create a dictionary mapping attribute name to attribute value for this
     # particular instance.
     result = {column: getattr(instance, column) for column in columns}

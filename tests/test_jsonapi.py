@@ -107,12 +107,13 @@ class TestDocumentStructure(ManagerTestBase):
         .. _Resource Objects: http://jsonapi.org/format/#document-structure-resource-objects
 
         """
-        article = self.Article(id=1)
-        self.session.add(article)
+        person = self.Person(id=1)
+        self.session.add(person)
         self.session.commit()
-        response = self.app.get('/api/article/1')
-        article = loads(response.data)['data']
-        assert 'author_id' not in article
+        response = self.app.get('/api/person/1')
+        person = loads(response.data)['data']
+        assert person['id'] == '1'
+        assert person['type'] == 'person'
 
     def test_no_foreign_keys(self):
         """By default, foreign keys should not appear in the representation of
@@ -124,13 +125,13 @@ class TestDocumentStructure(ManagerTestBase):
         .. _Resource Objects: http://jsonapi.org/format/#document-structure-resource-objects
 
         """
-        person = self.Person(id=1)
-        self.session.add(person)
+        article = self.Article(id=1)
+        self.session.add(article)
         self.session.commit()
-        response = self.app.get('/api/person/1')
-        person = loads(response.data)['data']
-        assert person['id'] == '1'
-        assert person['type'] == 'person'
+        response = self.app.get('/api/article/1')
+        document = loads(response.data)
+        article = document['data']
+        assert 'author_id' not in article
 
     def test_self_link(self):
         """Tests that a request to a self link responds with the same object.
@@ -269,9 +270,10 @@ class TestDocumentStructure(ManagerTestBase):
         allowed = {'self', 'resource', 'type', 'id', 'meta', 'first', 'last',
                    'next', 'prev'}
         alphanumeric = string.ascii_letters + string.digits
-        for link_object in document['links'].values():
-            assert all(d in allowed or k[0] not in alphanumeric
-                       for k in link_object)
+        for link_name, link_object in document['links'].items():
+            if link_name not in ('first', 'last', 'next', 'prev', 'self'):
+                assert all(k in allowed or k[0] not in alphanumeric
+                           for k in link_object)
 
     def test_compound_document_to_many(self):
         """Tests for getting linked resources from a homogeneous to-many

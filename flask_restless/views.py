@@ -1539,9 +1539,11 @@ class API(APIBase):
                 related_value_instance = get_by(self.session, related_model,
                                                 relationinstid)
                 if related_value_instance is None:
-                    return error_response(404)
+                    detail = ('No relation exists with name'
+                              ' "{0}"').format(relationname)
+                    return error_response(404, detail=detail)
                 result = self.serialize(related_value_instance,
-                                        fields_for_this)
+                                        only=fields_for_this)
             else:
                 # for security purposes, don't transmit list as top-level JSON
                 if is_like_list(instance, relationname):
@@ -1553,9 +1555,11 @@ class API(APIBase):
                     result = [self.serialize(inst, only=fields_for_this)
                               for inst in related_value]
                 else:
-                    result = self.serialize(related_value, fields_for_this)
-        if result is None:
-            return error_response(404)
+                    result = self.serialize(related_value,
+                                            only=fields_for_this)
+        # if result is None:
+        #     return error_response(404)
+
         # Wrap the result
         result = dict(data=result)
         # Add any links requested to be included by URL parameters.
@@ -1635,22 +1639,6 @@ class API(APIBase):
                         # TODO Raise an error here.
                         pass
         return ids_to_link
-
-    def _get_many(self, *ids):
-        # Each call to _get_single returns a two-tuple whose left element is
-        # the dictionary to be converted into JSON and whose right element is
-        # the status code.
-        result = [self._get_single(instid) for instid in ids]
-        # If any of the instances was not found, return a 404 for the whole
-        # request.
-        if any(status == 404 for data, status in result):
-            return error_response(404)
-        # HACK This should really not be necessary.
-        #
-        # Collect all the instances into a single list and wrap the collection
-        # with the collection name.
-        collection = [data[self.collection_name] for data, status in result]
-        return {self.collection_name: collection}, 200
 
     def get(self, instid, relationname, relationinstid):
         """Returns a JSON representation of an instance of model with the
@@ -1820,7 +1808,8 @@ class API(APIBase):
         for postprocessor in self.postprocessors['DELETE_SINGLE']:
             postprocessor(was_deleted=was_deleted)
         if not was_deleted:
-            return error_response(404)
+            detail = 'There was no instance to delete.'
+            return error_response(404, detail=detail)
         return {}, 204
 
     # def _create_single(self, data):
@@ -2435,5 +2424,6 @@ class RelationshipAPI(APIBase):
         for postprocessor in self.postprocessors['DELETE']:
             postprocessor(was_deleted=was_deleted)
         if not was_deleted:
-            return error_response(404)
+            detail = 'There was no instance to delete'
+            return error_response(404, detail=detail)
         return {}, 204
