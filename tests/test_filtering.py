@@ -89,10 +89,6 @@ class TestFiltering(ManagerTestBase):
             target_url += '&filter[single]={0}'.format(1 if single else 0)
         return self.app.get(target_url)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_bad_filter(self):
         """Tests that providing a bad filter parameter causes an error
         response.
@@ -468,10 +464,6 @@ class TestAssociationProxy(ManagerTestBase):
         if single is not None:
             target_url += '&filter[single]={0}'.format(1 if single else 0)
         return self.app.get(target_url)
-
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
 
     def test_any(self):
         """Tests for filtering on a many-to-many relationship via an

@@ -39,10 +39,6 @@ class TestFunctionEvaluation(ManagerTestBase):
         self.Base.metadata.create_all()
         self.manager.create_api(Person, allow_functions=True)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_multiple_functions(self):
         """Test that the :http:get:`/api/eval/person` endpoint returns the
         result of evaluating multiple functions.

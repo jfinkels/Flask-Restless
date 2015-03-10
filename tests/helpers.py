@@ -27,6 +27,12 @@ import uuid
 
 from flask import Flask
 from flask import json
+try:
+    from flask.ext import sqlalchemy as flask_sqlalchemy
+except ImportError:
+    has_flask_sqlalchemy = False
+else:
+    has_flask_sqlalchemy = True
 from nose import SkipTest
 from sqlalchemy import Boolean
 from sqlalchemy import Column
@@ -52,11 +58,6 @@ from sqlalchemy.orm.session import Session as SessionBase
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.associationproxy import association_proxy
-
-try:
-    from flask.ext import sqlalchemy as flask_sa
-except ImportError:
-    flask_sa = None
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
@@ -114,25 +115,26 @@ def skip(reason=None):
 
 
 def unregister_fsa_session_signals():
-    """
-    When Flask-SQLAlchemy object is created, it registers some
-    session signal handlers.
+    """Unregisters Flask-SQLAlchemy session commit and rollback signal
+    handlers.
 
-    In case of using both default SQLAlchemy session and Flask-SQLAlchemy
-    session (thats happening in tests), we need to unregister this handlers or
-    there will be some exceptions during test executions like:
+    When a Flask-SQLAlchemy object is created, it registers signal handlers for
+    ``before_commit``, ``after_commit``, and ``after_rollback`` signals. In
+    case of using both a plain SQLAlchemy session and a Flask-SQLAlchemy
+    session (as is happening in the tests in this package), we need to
+    unregister handlers or there will be some exceptions during test
+    executions like::
+
         AttributeError: 'Session' object has no attribute '_model_changes'
 
     """
-    if not flask_sa:
+    if not has_flask_sqlalchemy:
         return
-
-    event.remove(SessionBase, 'before_commit',
-                 flask_sa._SessionSignalEvents.session_signal_before_commit)
-    event.remove(SessionBase, 'after_commit',
-                 flask_sa._SessionSignalEvents.session_signal_after_commit)
-    event.remove(SessionBase, 'after_rollback',
-                 flask_sa._SessionSignalEvents.session_signal_after_rollback)
+    events = flask_sqlalchemy._SessionSignalEvents
+    signal_names = ('before_commit', 'after_commit', 'after_rollback')
+    for signal_name in signal_names:
+        signal = getattr(events, 'session_signal_{0}'.format(signal_name))
+        event.remove(SessionBase, signal)
 
 
 def force_json_contenttype(test_client):
@@ -250,6 +252,11 @@ class DatabaseTestBase(FlaskTestBase):
         self.session = scoped_session(self.Session)
         self.Base = declarative_base()
         self.Base.metadata.bind = engine
+
+    def tearDown(self):
+        """Drops all tables from the temporary database."""
+        self.session.remove()
+        self.Base.metadata.drop_all()
 
 
 class ManagerTestBase(DatabaseTestBase):

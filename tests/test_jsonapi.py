@@ -65,11 +65,6 @@ class TestDocumentStructure(ManagerTestBase):
         self.manager.create_api(Article)
         self.manager.create_api(Person)
 
-    # TODO refactor this so that it lives in a superclass.
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_get_primary_data(self):
         """Tests that the top-level key in a response is ``data``."""
         response = self.app.get('/api/person')
@@ -388,10 +383,6 @@ class TestPagination(ManagerTestBase):
         self.Base.metadata.create_all()
         self.manager.create_api(Person)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_no_client_parameters(self):
         """Tests that a request without pagination query parameters returns the
         first page of the collection.
@@ -695,10 +686,6 @@ class TestFetchingResources(ManagerTestBase):
         # TODO Fix this by simply not creating links to related models for
         # which no API has been made.
         self.manager.create_api(Comment)
-
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
 
     def test_correct_accept_header(self):
         """Tests that the server responds with a resource if the ``Accept``
@@ -1102,10 +1089,6 @@ class TestCreatingResources(ManagerTestBase):
         self.manager.create_api(Article, methods=['POST'],
                                 allow_client_generated_ids=True)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_create(self):
         """Tests that the client can create a single resource.
 
@@ -1260,10 +1243,6 @@ class TestUpdatingResources(ManagerTestBase):
         self.Base.metadata.create_all()
         self.manager.create_api(Person, methods=['PUT'])
         self.manager.create_api(Article, methods=['PUT'])
-
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
 
     def test_update(self):
         """Tests that the client can update a resource's attributes.
@@ -1572,10 +1551,6 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.Base.metadata.create_all()
         self.manager.create_api(self.Person, methods=['PUT', 'POST', 'DELETE'])
         self.manager.create_api(self.Article, methods=['PUT'])
-
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
 
     def test_to_one(self):
         """Tests for updating a to-one relationship via a :http:method:`put`

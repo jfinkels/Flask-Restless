@@ -93,10 +93,6 @@ class TestCreating(ManagerTestBase):
         self.manager.create_api(Article, methods=['POST'])
         self.manager.create_api(Tag, methods=['POST'])
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_deserializing_time(self):
         """Test for deserializing a JSON representation of a time field."""
         # datetime.time objects are not serializable by default so we need to
@@ -438,10 +434,6 @@ class TestAssociationProxy(ManagerTestBase):
         # which no API has been made.
         self.manager.create_api(Tag)
         self.manager.create_api(ArticleTag)
-
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
 
     def test_create(self):
         """Test for creating a new instance of the database model that has a

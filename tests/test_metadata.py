@@ -35,11 +35,6 @@ class TestMetadata(ManagerTestBase):
         self.Base.metadata.create_all()
         self.manager.create_api(Person)
 
-    # TODO refactor this so that it lives in a superclass.
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_total(self):
         """Tests that a request for (a subset of) all instances of a model
         includes the total number of results as part of the JSON response.

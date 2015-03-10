@@ -92,10 +92,6 @@ class TestUpdating(ManagerTestBase):
         self.manager.create_api(Interval, methods=['PUT'])
         self.manager.create_api(Person, methods=['PUT'])
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_deserializing_time(self):
         """Test for deserializing a JSON representation of a time field."""
         person = self.Person(id=1)
@@ -313,19 +309,6 @@ class TestUpdating(ManagerTestBase):
         assert interval.start == 5
         assert interval.end == 9
         assert interval.radius == 2
-
-    def test_nonexistent_field(self):
-        """Tests for an error response on a request to update a nonexistent
-        field.
-
-        """
-        person = self.Person(id=1)
-        self.session.add(person)
-        self.session.commit()
-        data = dict(data=dict(type='person', id=1, bogus=0))
-        response = self.put('/api/person/1', data=dumps(data))
-        assert response.status_code == 400
-        # TODO check the error message here
 
     # def test_content_type(self):
     #     """Tests that the server responds only to requests with a JSON
@@ -877,10 +860,6 @@ class TestAssociationProxy(ManagerTestBase):
         self.manager.create_api(ArticleTag)
         self.manager.create_api(UserKeyword)
         self.manager.create_api(Keyword)
-
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
 
     def test_update(self):
         """Test for updating a model with a many-to-many relation that uses an

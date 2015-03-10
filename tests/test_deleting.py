@@ -45,10 +45,6 @@ class TestDeleting(ManagerTestBase):
         self.Base.metadata.create_all()
         self.manager.create_api(Person, methods=['DELETE'])
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`201` if the
         request has the correct JSON API content type.

@@ -102,10 +102,6 @@ class TestFetching(ManagerTestBase):
         self.manager.create_api(Person)
         self.manager.create_api(Tag)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_serialize_time(self):
         """Test for getting the JSON representation of a time field."""
         now = datetime.now().time()
@@ -352,10 +348,6 @@ class TestDynamicRelationships(ManagerTestBase):
         self.manager.create_api(Article)
         self.manager.create_api(Person)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_to_one(self):
         """Tests for fetching a resource with a dynamic link to a to-one
         relation.
@@ -459,10 +451,6 @@ class TestAssociationProxy(ManagerTestBase):
         self.manager.create_api(Tag)
         self.manager.create_api(ArticleTag)
 
-    def tearDown(self):
-        """Drops all tables from the temporary database."""
-        self.Base.metadata.drop_all()
-
     def test_fetch(self):
         """Test for fetching a resource that has a many-to-many relation that
         uses an association proxy.
@@ -519,7 +507,9 @@ class TestFlaskSqlalchemy(FlaskTestBase):
         self.manager.create_api(self.Person)
 
     def tearDown(self):
-        """Drops all tables."""
+        """Drops all tables and unregisters Flask-SQLAlchemy session signals.
+
+        """
         self.db.drop_all()
         unregister_fsa_session_signals()
 
