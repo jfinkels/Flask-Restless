@@ -30,7 +30,32 @@ from .helpers import skip
 from .helpers import ManagerTestBase
 
 
-class TestFiltering(ManagerTestBase):
+class SearchTestBase(ManagerTestBase):
+
+    def search(self, url, filters=None, single=None):
+        """Convenience function for performing a filtered :http:method:`get`
+        request.
+
+        `url` is the ``path`` part of the URL to which the request will be
+        sent.
+
+        If `filters` is specified, it must be a Python list containing filter
+        objects. It specifies how to set the ``filter[objects]`` query
+        parameter.
+
+        If `single` is specified, it must be a Boolean. It specifies how to set
+        the ``filter[single]`` query parameter.
+
+        """
+        if filters is None:
+            filters = []
+        target_url = '{0}?filter[objects]={1}'.format(url, dumps(filters))
+        if single is not None:
+            target_url += '&filter[single]={0}'.format(1 if single else 0)
+        return self.app.get(target_url)
+
+
+class TestFiltering(SearchTestBase):
     """Tests for filtering resources."""
 
     def setUp(self):
@@ -66,28 +91,6 @@ class TestFiltering(ManagerTestBase):
         # TODO Fix this by simply not creating links to related models for
         # which no API has been made.
         self.manager.create_api(Comment)
-
-    def search(self, url, filters=None, single=None):
-        """Convenience function for performing a filtered :http:method:`get`
-        request.
-
-        `url` is the ``path`` part of the URL to which the request will be
-        sent.
-
-        If `filters` is specified, it must be a Python list containing filter
-        objects. It specifies how to set the ``filter[objects]`` query
-        parameter.
-
-        If `single` is specified, it must be a Boolean. It specifies how to set
-        the ``filter[single]`` query parameter.
-
-        """
-        if filters is None:
-            filters = []
-        target_url = '{0}?filter[objects]={1}'.format(url, dumps(filters))
-        if single is not None:
-            target_url += '&filter[single]={0}'.format(1 if single else 0)
-        return self.app.get(target_url)
 
     def test_bad_filter(self):
         """Tests that providing a bad filter parameter causes an error
@@ -137,6 +140,16 @@ class TestFiltering(ManagerTestBase):
         person2 = self.Person(id=2)
         self.session.add_all([person1, person2])
         self.session.commit()
+        response = self.search('/api/person', single=True)
+        # TODO should this be a 404? Maybe 409 is better?
+        assert response.status_code == 404
+        # TODO check the error message here.
+
+    def test_single_too_few(self):
+        """Tests that requiring a single resource response yields an error
+        response if the filtered request would have returned zero resources.
+
+        """
         response = self.search('/api/person', single=True)
         # TODO should this be a 404? Maybe 409 is better?
         assert response.status_code == 404
@@ -214,6 +227,26 @@ class TestFiltering(ManagerTestBase):
         comments = document['data']
         assert len(comments) == 2
         assert ['2', '3'] == sorted(comment['id'] for comment in comments)
+
+    def test_has_with_has(self):
+        """Tests for nesting a ``has`` filter beneath another ``has`` filter.
+
+        """
+        assert False, 'Not implemented'
+
+    def test_any_with_any(self):
+        """Tests for nesting an ``any`` filter beneath another ``any`` filter.
+
+        """
+        assert False, 'Not implemented'
+
+    def test_has_with_any(self):
+        """Tests for nesting a ``has`` filter beneath an ``any`` filter."""
+        assert False, 'Not implemented'
+
+    def test_any_with_has(self):
+        """Tests for nesting an ``any`` filter beneath a ``has`` filter."""
+        assert False, 'Not implemented'
 
     def test_comparing_fields(self):
         """Test for comparing the value of two fields in a filter object."""
@@ -398,7 +431,223 @@ class TestFiltering(ManagerTestBase):
         # TODO check error message here
 
 
-class TestAssociationProxy(ManagerTestBase):
+class TestOperators(SearchTestBase):
+
+    def setUp(self):
+        """Creates the database, the :class:`~flask.Flask` object, the
+        :class:`~flask.ext.restless.manager.APIManager` for that application,
+        and creates the ReSTful API endpoints for the models used in the test
+        methods.
+
+        """
+        super(TestFiltering, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+            # age = Column(Integer)
+            # birthday = Column(Date)
+
+        # class Comment(self.Base):
+        #     __tablename__ = 'comment'
+        #     id = Column(Integer, primary_key=True)
+        #     content = Column(Unicode)
+        #     author_id = Column(Integer, ForeignKey('person.id'))
+        #     author = relationship('Person', backref=backref('comments'))
+
+        self.Person = Person
+        # self.Comment = Comment
+        self.Base.metadata.create_all()
+        self.manager.create_api(Person)
+        # HACK Need to create APIs for these other models because otherwise
+        # we're not able to create the link URLs to them.
+        #
+        # TODO Fix this by simply not creating links to related models for
+        # which no API has been made.
+        # self.manager.create_api(Comment)
+
+    def test_equals(self):
+        """Tests for the ``eq`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        for op in '==', 'eq', 'equals', 'equal_to':
+            filters = [dict(name='id', op=op, val=1)]
+            response = self.search('/api/person', filters)
+            document = loads(response.data)
+            people = document['data']
+            assert ['1'] == sorted(person['id'] for person in people)
+
+    def test_not_equal(self):
+        """Tests for the ``neq`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        for op in '!=', 'ne', 'neq', 'not_equal_to', 'does_not_equal':
+            filters = [dict(name='id', op=op, val=1)]
+            response = self.search('/api/person', filters)
+            document = loads(response.data)
+            people = document['data']
+            assert ['2'] == sorted(person['id'] for person in people)
+
+    def test_greater_than(self):
+        """Tests for the ``gt`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        for op in '>', 'gt':
+            filters = [dict(name='id', op=op, val=1)]
+            response = self.search('/api/person', filters)
+            document = loads(response.data)
+            people = document['data']
+            assert ['2'] == sorted(person['id'] for person in people)
+
+    def test_less_than(self):
+        """Tests for the ``lt`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        for op in '<', 'lt':
+            filters = [dict(name='id', op=op, val=2)]
+            response = self.search('/api/person', filters)
+            document = loads(response.data)
+            people = document['data']
+            assert ['1'] == sorted(person['id'] for person in people)
+
+    def test_greater_than_or_equal(self):
+        """Tests for the ``gte`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        person3 = self.Person(id=3)
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        for op in '>=', 'ge', 'gte', 'geq':
+            filters = [dict(name='id', op=op, val=2)]
+            response = self.search('/api/person', filters)
+            document = loads(response.data)
+            people = document['data']
+            assert ['2', '3'] == sorted(person['id'] for person in people)
+
+    def test_less_than_or_equal(self):
+        """Tests for the ``lte`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        person3 = self.Person(id=3)
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        for op in '<=', 'le', 'lte', 'leq':
+            filters = [dict(name='id', op=op, val=2)]
+            response = self.search('/api/person', filters)
+            document = loads(response.data)
+            people = document['data']
+            assert ['1', '2'] == sorted(person['id'] for person in people)
+
+    def test_like(self):
+        """Tests for the ``like`` operator."""
+        person1 = self.Person(name='foo')
+        person2 = self.Person(name='bar')
+        person3 = self.Person(name='baz')
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        # TODO refactor the url_quote() calls into the search() method
+        filters = [dict(name='name', op='like', val=url_quote('%ba%'))]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['bar', 'baz'] == sorted(person['name'] for person in people)
+
+    def test_ilike(self):
+        """Tests for the ``ilike`` operator."""
+        person1 = self.Person(name='foo')
+        person2 = self.Person(name='bar')
+        person3 = self.Person(name='baz')
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        filters = [dict(name='name', op='ilike', val=url_quote('%BA%'))]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['bar', 'baz'] == sorted(person['name'] for person in people)
+
+    def test_in(self):
+        """Tests for the ``in`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        person3 = self.Person(id=3)
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        filters = [dict(name='id', op='in', val=[1, 3])]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['1', '3'] == sorted(person['id'] for person in people)
+
+    def test_not_in(self):
+        """Tests for the ``not_in`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        person3 = self.Person(id=3)
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        filters = [dict(name='id', op='not_in', val=[1, 3])]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['2'] == sorted(person['id'] for person in people)
+
+    def test_is_null(self):
+        """Tests for the ``is_null`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2, name='foo')
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        filters = [dict(name='name', op='is_null')]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['1'] == sorted(person['id'] for person in people)
+
+    def test_is_null(self):
+        """Tests for the ``is_not_null`` operator."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2, name='foo')
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        filters = [dict(name='name', op='is_not_null')]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['2'] == sorted(person['id'] for person in people)
+
+    def test_compare_equals_to_null(self):
+        """Tests that an attempt to compare the value of a field to ``None``
+        using the ``eq`` operator yields an error response, indicating that the
+        user should use the ``is_null` operation instead.
+
+        """
+        filters = [dict(name='name', op='eq', val=None)]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        assert response.status_code == 400
+        # TODO check the error message here.
+
+    # TODO I don't understand these operators, so I can't test them.
+    def test_desc(self):
+        """Tests for the ``desc`` operator."""
+        assert False, 'Not implemented'
+
+    # TODO I don't understand these operators, so I can't test them.
+    def test_asc(self):
+        """Tests for the ``asc`` operator."""
+        assert False, 'Not implemented'
+
+
+class TestAssociationProxy(SearchTestBase):
     """Test for filtering on association proxies."""
 
     def setUp(self):
@@ -442,29 +691,6 @@ class TestAssociationProxy(ManagerTestBase):
         self.manager.create_api(ArticleTag)
         self.manager.create_api(Tag)
 
-    # TODO refactor this method
-    def search(self, url, filters=None, single=None):
-        """Convenience function for performing a filtered :http:method:`get`
-        request.
-
-        `url` is the ``path`` part of the URL to which the request will be
-        sent.
-
-        If `filters` is specified, it must be a Python list containing filter
-        objects. It specifies how to set the ``filter[objects]`` query
-        parameter.
-
-        If `single` is specified, it must be a Boolean. It specifies how to set
-        the ``filter[single]`` query parameter.
-
-        """
-        if filters is None:
-            filters = []
-        target_url = '{0}?filter[objects]={1}'.format(url, dumps(filters))
-        if single is not None:
-            target_url += '&filter[single]={0}'.format(1 if single else 0)
-        return self.app.get(target_url)
-
     def test_any(self):
         """Tests for filtering on a many-to-many relationship via an
         association proxy backed by an association object.
@@ -488,51 +714,3 @@ class TestAssociationProxy(ManagerTestBase):
         document = loads(response.data)
         articles = document['data']
         assert ['1', '2'] == sorted(article['id'] for article in articles)
-
-
-# class TestOperators(ManagerTestBase):
-#     """Tests the behavior of different filter operators."""
-
-#     def setUp(self):
-#         """Creates the database, the :class:`~flask.Flask` object, the
-#         :class:`~flask.ext.restless.manager.APIManager` for that application,
-#         and creates the ReSTful API endpoints for the models used in the test
-#         methods.
-
-#         """
-#         super(TestOperators, self).setUp()
-
-#         class Person(self.Base):
-#             __tablename__ = 'person'
-#             id = Column(Integer, primary_key=True)
-
-#         self.Person = Person
-#         self.Base.metadata.create_all()
-#         self.manager.create_api(Person)
-
-#     # TODO Refactor this method out of this and the previous class.
-#     def search(self, url, filters=None, single=None):
-#         """Convenience function for performing a filtered :http:method:`get`
-#         request.
-
-#         `url` is the ``path`` part of the URL to which the request will be
-#         sent.
-
-#         If `filters` is specified, it must be a Python list containing filter
-#         objects. It specifies how to set the ``filter[objects]`` query
-#         parameter.
-
-#         If `single` is specified, it must be a Boolean. It specifies how to set
-#         the ``filter[single]`` query parameter.
-
-#         """
-#         if filters is None:
-#             filters = []
-#         target_url = '{0}?filter[objects]={1}'.format(url, dumps(filters))
-#         if single is not None:
-#             target_url += '&filter[single]={0}'.format(1 if single else 0)
-#         return self.app.get(target_url)
-
-#     def tearDown(self):
-#         """Drops all tables from the temporary database."""
-#         self.Base.metadata.drop_all()

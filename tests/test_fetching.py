@@ -318,9 +318,24 @@ class TestFetching(ManagerTestBase):
         person = document['data']
         assert not person['has_early_bedtime']
 
+    # TODO does this even make sense?
+    def test_group_by(self):
+        """Tests for grouping a collection of resources according to a field.
+
+        """
+        article1 = self.Article(id=1, title='foo')
+        article2 = self.Article(id=2, title='bar')
+        article3 = self.Article(id=3, title='foo')
+        self.session.add_all([article1, article2, article])
+        self.session.commit()
+        response = self.app.get('/api/article?sort=-id&group=title')
+        document = loads(response.data)
+        articles = document['data']
+        assert False, 'Not implemented'
+
 
 class TestDynamicRelationships(ManagerTestBase):
-    """Tests for fetching resources from dynamic relationships."""
+    """Tests for fetching resources from dynamic to-many relationships."""
 
     def setUp(self):
         """Creates the database, the :class:`~flask.Flask` object, the
@@ -335,8 +350,8 @@ class TestDynamicRelationships(ManagerTestBase):
             __tablename__ = 'article'
             id = Column(Integer, primary_key=True)
             author_id = Column(Integer, ForeignKey('person.id'))
-            author = relationship('Person', lazy='dynamic',
-                                  backref=backref('articles', lazy='dynamic'))
+            author = relationship('Person', backref=backref('articles',
+                                                            lazy='dynamic'))
 
         class Person(self.Base):
             __tablename__ = 'person'
