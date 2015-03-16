@@ -63,7 +63,25 @@ class TestDocumentStructure(ManagerTestBase):
         self.Person = Person
         self.Base.metadata.create_all()
         self.manager.create_api(Article)
-        self.manager.create_api(Person)
+        self.manager.create_api(Person, methods=['GET', 'POST'])
+
+    def test_ignore_additional_members(self):
+        """Tests that the server ignores any additional top-level members.
+
+        For more information, see the `Document Structure`_ section of the JSON
+        API specification.
+
+        .. _Document Structure: http://jsonapi.org/format/#document-structure
+
+        """
+        # The key `bogus` is unknown to the JSON API specification, and
+        # therefore should be ignored.
+        data = dict(data=dict(type='person'), bogus=True)
+        response = self.app.post('/api/person', data=dumps(data))
+        assert response.status_code == 201
+        document = loads(response.data)
+        assert 'errors' not in document
+        assert self.session.query(self.Person).count() == 1
 
     def test_get_primary_data(self):
         """Tests that the top-level key in a response is ``data``."""
