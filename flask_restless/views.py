@@ -1163,20 +1163,20 @@ class API(APIBase):
             links = data.pop('links', {})
             for link_name, link_object in links.items():
                 related_model = get_related_model(self.model, link_name)
-                # If this is a to-one relationship, just get a single instance.
-                if 'id' in link_object:
+                # TODO check for type conflicts
+                #
+                # If this is a to-many relationship, get all the instances.
+                if isinstance(link_object, list):
+                    related_instances = [get_by(self.session, related_model,
+                                                rel['id'])
+                                         for rel in link_object]
+                    links[link_name] = related_instances
+                # Otherwise, if this is a to-one relationship, just get a
+                # single instance.
+                else:
                     id_ = link_object['id']
                     related_instance = get_by(self.session, related_model, id_)
                     links[link_name] = related_instance
-                # Otherwise, if this is a to-many relationship, get all the
-                # instances.
-                elif 'ids' in link_object:
-                    related_instances = [get_by(self.session, related_model, d)
-                                         for d in link_object['ids']]
-                    links[link_name] = related_instances
-                else:
-                    # TODO raise an error here
-                    pass
         # TODO Need to check here if any related instances are None, like we do
         # in the put() method.
         pass
@@ -1615,14 +1615,11 @@ class API(APIBase):
                     if link in resource['links']:
                         link_object = resource['links'][link]
                         link_type = link_object['type']
-                        if 'ids' in link_object:
+                        if isinstance(link_object, list):
                             ids_to_link[link_type] |= \
-                                set(link_object['ids'])
-                        elif 'id' in resource[link]:
-                            ids_to_link[link_type].add(link_object['id'])
+                                set(rel['id'] for rel in link_object)
                         else:
-                            # TODO Raise an error here.
-                            pass
+                            ids_to_link[link_type].add(link_object['id'])
             # Otherwise, if there is just a single instance, look through
             # the links to get the IDs of the linked instances.
             else:
@@ -1631,13 +1628,11 @@ class API(APIBase):
                 if link in original['links']:
                     link_object = original['links'][link]
                     link_type = link_object['type']
-                    if 'ids' in link_object:
-                        ids_to_link[link_type] |= set(link_object['ids'])
-                    elif 'id' in link_object:
-                        ids_to_link[link_type].add(link_object['id'])
+                    if isinstance(link_object, list):
+                        ids_to_link[link_type] |= \
+                            set(rel['id'] for rel in link_object)
                     else:
-                        # TODO Raise an error here.
-                        pass
+                        ids_to_link[link_type].add(link_object['id'])
         return ids_to_link
 
     def get(self, instid, relationname, relationinstid):
@@ -1758,12 +1753,12 @@ class API(APIBase):
             # See the note under the preprocessor in the get() method.
             if temp_result is not None:
                 instid = temp_result
-        if ',' in instid:
-            ids = instid.split(',')
-            inst = [get_by(self.session, self.model, id_, self.primary_key)
-                    for id_ in ids]
-        else:
-            inst = get_by(self.session, self.model, instid, self.primary_key)
+        # if ',' in instid:
+        #     ids = instid.split(',')
+        #     inst = [get_by(self.session, self.model, id_, self.primary_key)
+        #             for id_ in ids]
+        # else:
+        inst = get_by(self.session, self.model, instid, self.primary_key)
         if relationname is not None:
             # If no such relation exists, return an error to the client.
             if not hasattr(inst, relationname):
@@ -1774,14 +1769,16 @@ class API(APIBase):
             if relationinstid is not None:
                 related_model = get_related_model(self.model, relationname)
                 relation = getattr(inst, relationname)
-                if ',' in relationinstid:
-                    ids = relationinstid.split(',')
-                else:
-                    ids = [relationinstid]
-                toremove = (get_by(self.session, related_model, id_) for id_ in
-                            ids)
-                for obj in toremove:
-                    relation.remove(obj)
+                # if ',' in relationinstid:
+                #     ids = relationinstid.split(',')
+                # else:
+                #     ids = [relationinstid]
+                # toremove = (get_by(self.session, related_model, id_) for id_ in
+                #             ids)
+                # for obj in toremove:
+                #     relation.remove(obj)
+                toremove = get_by(self.session, related_model, relationinstid)
+                relation.remove(toremove)
             else:
                 # If there is no link there to delete, return an error.
                 if getattr(inst, relationname) is None:
@@ -2005,22 +2002,20 @@ class API(APIBase):
             # TODO check for conflicting or missing types here
             # type_ = link['type']
 
-            # If this is a to-one relationship, just get the single related
-            # resource. If it is a to-many relationship, get all the related
+            # If this is a to-many relationship, get all the related
             # resources.
-            if 'id' in link:
-                newvalue = get_by(self.session, related_model, link['id'])
-            elif 'ids' in link:
+            if isinstance(link, list):
                 # Replacement of a to-many relationship may have been disabled
                 # by the user.
                 if not self.allow_to_many_replacement:
                     message = 'Not allowed to replace a to-many relationship'
                     return error_response(403, detail=message)
-                newvalue = [get_by(self.session, related_model, related_id)
-                            for related_id in link['ids']]
+                newvalue = [get_by(self.session, related_model, rel['id'])
+                            for rel in link]
+            # Otherwise, it is a to-one relationship, so just get the single
+            # related resource.
             else:
-                # TODO raise error here for missing id or ids
-                pass
+                newvalue = get_by(self.session, related_model, link['id'])
             # If the to-one relationship resource or any of the to-many
             # relationship resources do not exist, return an error response.
             if newvalue is None:
@@ -2029,11 +2024,11 @@ class API(APIBase):
                 return error_response(404, detail=detail)
             elif isinstance(newvalue, list) and any(value is None
                                                     for value in newvalue):
-                not_found = (id_ for id_, value in zip(link['ids'], newvalue)
+                not_found = (rel for rel, value in zip(link, newvalue)
                              if value is None)
                 msg = 'No object of type {0} found with ID {1}'
-                errors = [error(detail=msg.format(link['type'], id_))
-                          for id_ in not_found]
+                errors = [error(detail=msg.format(rel['type'], rel['id']))
+                          for rel in not_found]
                 return errors_response(404, errors)
             try:
                 setattr(instance, linkname, newvalue)
