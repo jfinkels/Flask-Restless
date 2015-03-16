@@ -381,8 +381,8 @@ class TestDynamicRelationships(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         links = person['links']
-        articles = links['articles']
-        assert ['1', '2'] == sorted(articleid for articleid in articles['ids'])
+        articles = links['articles']['linkage']
+        assert ['1', '2'] == sorted(article['id'] for article in articles)
 
     def test_to_many_resource_url(self):
         """Tests for fetching a resource with a dynamic link to a to-many
@@ -465,8 +465,8 @@ class TestAssociationProxy(ManagerTestBase):
         document = loads(response.data)
         article = document['data']
         links = article['links']
-        tags = links['tags']
-        assert ['1'] == sorted(tags['ids'])
+        tags = links['tags']['linkage']
+        assert ['1'] == sorted(tag['id'] for tag in tags)
 
     def test_scalar(self):
         """Tests for fetching an association proxy to scalars as a list

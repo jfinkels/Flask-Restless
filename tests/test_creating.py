@@ -341,9 +341,15 @@ class TestCreating(ManagerTestBase):
         article2 = self.Article(id=2)
         self.session.add_all([article1, article2])
         self.session.commit()
-        data = dict(data=dict(type='person',
-                              links=dict(articles=dict(type='article',
-                                                       ids=[1, 2]))))
+        data = {'data':
+                    {'type': 'person',
+                     'links':
+                         {'articles':
+                              [{'type': 'article', 'id': '1'},
+                               {'type': 'article', 'id': '2'}]
+                          }
+                     }
+                }
         response = self.app.post('/api/person', data=dumps(data))
         assert response.status_code == 201
         document = loads(response.data)
@@ -356,8 +362,12 @@ class TestCreating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        data = dict(data=dict(type='article',
-                              links=dict(author=dict(type='person', id=1))))
+        data = {'data':
+                    {'type': 'person',
+                     'links':
+                         {'author': {'type': 'person', 'id': '1'}}
+                     }
+                }
         response = self.app.post('/api/article', data=dumps(data))
         assert response.status_code == 201
         document = loads(response.data)
@@ -445,15 +455,22 @@ class TestAssociationProxy(ManagerTestBase):
         tag2 = self.Tag(id=2)
         self.session.add_all([tag1, tag2])
         self.session.commit()
-        data = dict(data=dict(type='article',
-                              links=dict(tags=dict(type='tags', ids=[1, 2]))))
+        data = {'data':
+                    {'type': 'article',
+                     'links':
+                         {'tags':
+                              [{'type': 'tag', 'id': '1'},
+                               {'type': 'tag', 'id': '2'}]
+                          }
+                     }
+                }
         response = self.app.post('/api/article', data=dumps(data))
         assert response.status_code == 201
         document = loads(response.data)
         article = document['data']
         links = article['links']
-        tags = links['tags']
-        assert ['1', '2'] == sorted(tags['ids'])
+        tags = links['tags']['linkage']
+        assert ['1', '2'] == sorted(tag['id'] for tag in tags)
 
     def test_scalar(self):
         """Tests for creating a resource with an association proxy to scalars

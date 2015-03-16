@@ -35,7 +35,7 @@ class TestDocumentStructure(ManagerTestBase):
     """Tests corresponding to the `Document Structure`_ section of the JSON API
     specification.
 
-    .. _Document Structure: http://jsonapi.org/format/#document-structure-resource-relationships
+    .. _Document Structure: http://jsonapi.org/format/#document-structure
 
     """
 
@@ -304,14 +304,14 @@ class TestDocumentStructure(ManagerTestBase):
         person.articles = [article1, article2]
         self.session.add_all([person, article1, article2])
         self.session.commit()
-        # For a homogeneous to-many relationship, we should have a 'type' and
-        # an 'ids' key.
+        # For a homogeneous to-many relationship, we should have an array of
+        # objects, each of which has a 'type' key and an 'id' key.
         response = self.app.get('/api/person/1?include=articles')
         document = loads(response.data)
         person = document['data']
-        articles = person['links']['articles']
-        assert articles['type'] == 'article'
-        assert ['1', '2'] == sorted(articles['ids'])
+        articles = person['links']['articles']['linkage']
+        assert all(article['type'] == 'article' for article in articles)
+        assert ['1', '2'] == sorted(article['id'] for article in articles)
         linked = document['included']
         # Sort the links on their IDs, then get the two linked articles.
         linked_article1, linked_article2 = sorted(linked,
@@ -340,7 +340,7 @@ class TestDocumentStructure(ManagerTestBase):
         response = self.app.get('/api/article/1?include=author')
         document = loads(response.data)
         article = document['data']
-        author = article['links']['author']
+        author = article['links']['author']['linkage']
         assert author['type'] == 'person'
         assert author['id'] == '1'
         linked = document['included']
@@ -389,6 +389,14 @@ class TestDocumentStructure(ManagerTestBase):
 
 
 class TestPagination(ManagerTestBase):
+    """Tests for pagination links in fetched documents.
+
+    For more information, see the `Pagination`_ section of the JSON API
+    specification.
+
+    .. _Pagination: http://jsonapi.org/format/#fetching-pagination
+
+    """
 
     def setUp(self):
         super(TestPagination, self).setUp()
@@ -782,8 +790,8 @@ class TestFetchingResources(ManagerTestBase):
         response = self.app.get('/api/person/1')
         document = loads(response.data)
         person = document['data']
-        articleids = person['links']['articles']['ids']
-        assert articleids == ['1']
+        articles = person['links']['articles']['linkage']
+        assert ['1'] == sorted(article['id'] for article in articles)
         assert 'included' not in document
 
     def test_set_default_inclusion(self):
@@ -809,8 +817,8 @@ class TestFetchingResources(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         linked = document['included']
-        articleids = person['links']['articles']['ids']
-        assert articleids == ['1']
+        articles = person['links']['articles']['linkage']
+        assert ['1'] == sorted(article['id'] for article in articles)
         assert linked[0]['type'] == 'article'
         assert linked[0]['id'] == '1'
 
@@ -1357,8 +1365,8 @@ class TestUpdatingResources(ManagerTestBase):
                     {'type': 'person',
                      'id': '1',
                      'links':
-                         {'articles':
-                              {'type': 'article', 'ids': ['1', '2']}
+                         {'articles': [{'type': 'article', 'id': '1'},
+                                       {'type': 'article', 'id': '2'}]
                           }
                      }
                 }
@@ -1387,10 +1395,7 @@ class TestUpdatingResources(ManagerTestBase):
         data = {'data':
                     {'type': 'person',
                      'id': '1',
-                     'links':
-                         {'articles':
-                              {'type': 'article', 'ids': []}
-                          }
+                     'links': {'articles': []}
                      }
                 }
         response = self.app.put('/api2/person/1', data=dumps(data))
@@ -1414,10 +1419,7 @@ class TestUpdatingResources(ManagerTestBase):
         data = {'data':
                     {'type': 'person',
                      'id': '1',
-                     'links':
-                         {'articles':
-                              {'type': 'article', 'ids': []}
-                          }
+                     'links': {'articles': []}
                      }
                 }
         response = self.app.put('/api/person/1', data=dumps(data))
@@ -1469,10 +1471,7 @@ class TestUpdatingResources(ManagerTestBase):
         data = {'data':
                     {'type': 'person',
                      'id': '1',
-                     'links':
-                         {'articles':
-                              {'type': 'article', 'ids': [1]}
-                          }
+                     'links': {'articles': [{'type': 'article', 'id': '1'}]}
                      }
                 }
         response = self.app.put('/api2/person/1', data=dumps(data))
@@ -1632,7 +1631,8 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['PUT'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = dict(data=dict(type='article', ids=['1', '2']))
+        data = {'data': [{'type': 'article', 'id': '1'},
+                         {'type': 'article', 'id': '2'}]}
         response = self.app.put('/api2/person/1/links/articles',
                                 data=dumps(data))
         assert response.status_code == 204
@@ -1655,7 +1655,8 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['PUT'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = dict(data=dict(type='article', ids=['1', '2']))
+        data = {'data': [{'type': 'article', 'id': '1'},
+                         {'type': 'article', 'id': '2'}]}
         response = self.app.put('/api2/person/1/links/articles',
                                 data=dumps(data))
         assert response.status_code == 404
@@ -1674,7 +1675,7 @@ class TestUpdatingRelationships(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        data = dict(data=dict(type='article', ids=[]))
+        data = {'data': []}
         response = self.app.put('/api/person/1/links/articles',
                                 data=dumps(data))
         assert response.status_code == 403
@@ -1695,7 +1696,8 @@ class TestUpdatingRelationships(ManagerTestBase):
         article2 = self.Article(id=2)
         self.session.add_all([person, article1, article2])
         self.session.commit()
-        data = dict(data=dict(type='article', ids=['1', '2']))
+        data = {'data': [{'type': 'article', 'id': '1'},
+                         {'type': 'article', 'id': '2'}]}
         response = self.app.post('/api/person/1/links/articles',
                                  data=dumps(data))
         assert response.status_code == 204
@@ -1717,7 +1719,7 @@ class TestUpdatingRelationships(ManagerTestBase):
         person.articles = [article]
         self.session.add_all([person, article])
         self.session.commit()
-        data = dict(data=dict(type='article', ids=['1']))
+        data = {'data': [{'type': 'article', 'id': '1'}]}
         response = self.app.post('/api/person/1/links/articles',
                                  data=dumps(data))
         assert response.status_code == 204
@@ -1742,7 +1744,7 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['DELETE'],
                                 url_prefix='/api2',
                                 allow_delete_from_to_many_relationships=True)
-        data = dict(data=dict(type='article', ids=['1']))
+        data = {'data': [{'type': 'article', 'id': '1'}]}
         response = self.app.delete('/api2/person/1/links/articles',
                                    data=dumps(data))
         assert response.status_code == 204
@@ -1767,7 +1769,7 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['DELETE'],
                                 url_prefix='/api2',
                                 allow_delete_from_to_many_relationships=True)
-        data = dict(data=dict(type='article', ids=['2']))
+        data = {'data': [{'type': 'article', 'id': '2'}]}
         response = self.app.delete('/api2/person/1/links/articles',
                                    data=dumps(data))
         assert response.status_code == 204
@@ -1789,7 +1791,7 @@ class TestUpdatingRelationships(ManagerTestBase):
         person.articles = [article]
         self.session.add_all([person, article])
         self.session.commit()
-        data = dict(data=dict(type='article', ids=['1']))
+        data = {'data': [{'type': 'article', 'id': '1'}]}
         response = self.app.delete('/api/person/1/links/articles',
                                    data=dumps(data))
         assert response.status_code == 403

@@ -882,7 +882,8 @@ class TestAssociationProxy(ManagerTestBase):
                      'id': '1',
                      'links':
                          {'tags':
-                              {'type': 'tag', 'ids': ['1', '2']}
+                              [{'type': 'tag', 'id': '1'},
+                               {'type': 'tag', 'id': '2'}]
                           }
                      }
                 }
