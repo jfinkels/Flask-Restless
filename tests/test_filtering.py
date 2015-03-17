@@ -612,7 +612,7 @@ class TestOperators(SearchTestBase):
         people = document['data']
         assert ['1'] == sorted(person['id'] for person in people)
 
-    def test_is_null(self):
+    def test_is_not_null(self):
         """Tests for the ``is_not_null`` operator."""
         person1 = self.Person(id=1)
         person2 = self.Person(id=2, name='foo')
@@ -632,7 +632,6 @@ class TestOperators(SearchTestBase):
         """
         filters = [dict(name='name', op='eq', val=None)]
         response = self.search('/api/person', filters)
-        document = loads(response.data)
         assert response.status_code == 400
         # TODO check the error message here.
 

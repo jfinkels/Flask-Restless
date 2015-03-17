@@ -326,7 +326,7 @@ class TestFetching(ManagerTestBase):
         article1 = self.Article(id=1, title='foo')
         article2 = self.Article(id=2, title='bar')
         article3 = self.Article(id=3, title='foo')
-        self.session.add_all([article1, article2, article])
+        self.session.add_all([article1, article2, article3])
         self.session.commit()
         response = self.app.get('/api/article?sort=-id&group=title')
         document = loads(response.data)
