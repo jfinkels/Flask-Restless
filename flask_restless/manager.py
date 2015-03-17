@@ -14,7 +14,10 @@
 """
 from collections import defaultdict
 from collections import namedtuple
-from urllib.parse import urljoin
+try:
+    from urllib.parse import urljoin
+except ImportError:
+    from urlparse import urljoin
 
 import flask
 from flask import request

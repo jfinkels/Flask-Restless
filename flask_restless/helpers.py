@@ -11,7 +11,10 @@
 """
 import datetime
 import inspect
-from urllib.parse import urljoin
+try:
+    from urllib.parse import urljoin
+except ImportError:
+    from urlparse import urljoin
 import uuid
 
 from dateutil.parser import parse as parse_datetime

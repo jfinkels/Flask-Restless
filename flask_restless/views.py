@@ -679,8 +679,13 @@ class APIBase(ModelView):
 
         """
         self.session.rollback()
-        errors = extract_error_messages(exception) or \
-            'Could not determine specific validation errors'
+        errors = extract_error_messages(exception)
+        if not errors:
+            return error_response(400, title='Validation error')
+        if isinstance(errors, dict):
+            errors = [error(title='Validation error',
+                            detail='{0}: {1}'.format(field, detail))
+                      for field, detail in errors.items()]
         return errors_response(400, errors)
 
 
@@ -2220,7 +2225,7 @@ class API(APIBase):
 
 class RelationshipAPI(APIBase):
 
-    def __init__(self, *args, allow_delete_from_to_many_relationships=False,
+    def __init__(self, allow_delete_from_to_many_relationships=False,
                  **kw):
         super(RelationshipAPI, self).__init__(*args, **kw)
         self.allow_delete_from_to_many_relationships = \
