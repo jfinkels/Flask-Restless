@@ -56,7 +56,14 @@ class SearchTestBase(ManagerTestBase):
 
 
 class TestFiltering(SearchTestBase):
-    """Tests for filtering resources."""
+    """Tests for filtering resources.
+
+    For more information, see the `Filtering`_ section of the JSON API
+    specification.
+
+    .. _Filtering: http://jsonapi.org/format/#fetching-filtering
+
+    """
 
     def setUp(self):
         """Creates the database, the :class:`~flask.Flask` object, the
@@ -440,7 +447,7 @@ class TestOperators(SearchTestBase):
         methods.
 
         """
-        super(TestFiltering, self).setUp()
+        super(TestOperators, self).setUp()
 
         class Person(self.Base):
             __tablename__ = 'person'

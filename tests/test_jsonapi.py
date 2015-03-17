@@ -17,9 +17,11 @@ from urllib.parse import urlparse
 from uuid import uuid1
 
 from sqlalchemy import Column
-from sqlalchemy import Integer
+from sqlalchemy import DateTime
 from sqlalchemy import Float
 from sqlalchemy import ForeignKey
+from sqlalchemy import func
+from sqlalchemy import Integer
 from sqlalchemy import Unicode
 from sqlalchemy.orm import relationship
 
@@ -1070,17 +1072,6 @@ class TestFetchingResources(ManagerTestBase):
         articles = document['data']
         assert ['2', '1', '3'] == [c['id'] for c in articles]
 
-    def test_filtering(self):
-        """Tests that the client can specify filters.
-
-        For more information, see the `Filtering`_ section of the JSON API
-        specification.
-
-        .. _Filtering: http://jsonapi.org/format/#fetching-filtering
-
-        """
-        assert False, 'Not implemented'
-
 
 class TestCreatingResources(ManagerTestBase):
     """Tests corresponding to the `Creating Resources`_ section of the JSON API
@@ -1264,11 +1255,20 @@ class TestUpdatingResources(ManagerTestBase):
             age = Column(Integer)
             articles = relationship('Article')
 
+        class Tag(self.Base):
+            __tablename__ = 'tag'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+            updated_at = Column(DateTime, server_default=func.now(),
+                                onupdate=func.current_timestamp())
+
         self.Article = Article
         self.Person = Person
+        self.Tag = Tag
         self.Base.metadata.create_all()
-        self.manager.create_api(Person, methods=['PUT'])
         self.manager.create_api(Article, methods=['PUT'])
+        self.manager.create_api(Person, methods=['PUT'])
+        self.manager.create_api(Tag, methods=['GET', 'PUT'])
 
     def test_update(self):
         """Tests that the client can update a resource's attributes.
@@ -1436,7 +1436,18 @@ class TestUpdatingResources(ManagerTestBase):
         .. _200 OK: http://jsonapi.org/format/#crud-updating-responses-200
 
         """
-        assert False, 'Not implemented'
+        tag = self.Tag(id=1)
+        self.session.add(tag)
+        self.session.commit()
+        data = dict(data=dict(type='tag', id='1', name='foo'))
+        response = self.app.put('/api/tag/1', data=dumps(data))
+        assert response.status_code == 200
+        document = loads(response.data)
+        tag1 = document['data']
+        response = self.app.get('/api/tag/1')
+        document = loads(response.data)
+        tag2 = document['data']
+        assert tag1 == tag2
 
     def test_nonexistent(self):
         """Tests that an attempt to update a nonexistent resource causes a

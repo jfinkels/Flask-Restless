@@ -55,6 +55,7 @@ class TestFunctionEvaluation(ManagerTestBase):
         query = dumps(functions)
         response = self.app.get('/api/eval/person?functions={0}'.format(query))
         assert response.status_code == 200
+        print(response.data)
         document = loads(response.data)
         results = document['data']
         assert [45.0, 15.0, 3] == results
@@ -82,7 +83,7 @@ class TestFunctionEvaluation(ManagerTestBase):
 
         """
         response = self.app.get('/api/eval/person?functions=[]')
-        assert response.status_code == 204
+        assert response.status_code == 200
         document = loads(response.data)
         results = document['data']
         assert results == []
@@ -122,7 +123,7 @@ class TestFunctionEvaluation(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         functions = [dict(name='sum', field='age')]
-        response = self.app.get('/api/eval/person?functions=[{0}]'
+        response = self.app.get('/api/eval/person?functions={0}'
                                 '&callback=foo'.format(dumps(functions)))
         assert response.status_code == 200
         assert response.mimetype == 'application/javascript'

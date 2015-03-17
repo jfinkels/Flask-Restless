@@ -28,6 +28,10 @@ from .helpers import session_query
 from .helpers import string_to_datetime
 
 
+class ComparisonToNull(Exception):
+    pass
+
+
 def _sub_operator(model, argument, fieldname):
     """Recursively calls :func:`QueryBuilder._create_operation` when argument
     is a dictionary of the form specified in :ref:`search`.
@@ -413,7 +417,7 @@ class QueryBuilder(object):
         if argument is None:
             msg = ('To compare a value to NULL, use the is_null/is_not_null '
                    'operators.')
-            raise TypeError(msg)
+            raise ComparisonToNull(msg)
         if numargs == 2:
             return opfunc(field, argument)
         return opfunc(field, argument, fieldname)

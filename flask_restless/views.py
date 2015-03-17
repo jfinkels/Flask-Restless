@@ -50,11 +50,12 @@ from sqlalchemy.orm.query import Query
 from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import HTTPException
 
+from .helpers import changes_on_update
 from .helpers import collection_name
 from .helpers import count
 from .helpers import evaluate_functions
 from .helpers import get_by
-from .helpers import get_columns
+# from .helpers import get_columns
 from .helpers import get_or_create
 from .helpers import get_related_model
 from .helpers import get_relations
@@ -71,6 +72,7 @@ from .helpers import upper_keys
 from .helpers import url_for
 # from .helpers import get_related_association_proxy_model
 # from .search import create_query
+from .search import ComparisonToNull
 from .search import search
 
 
@@ -609,28 +611,33 @@ class FunctionAPI(ModelView):
         :ref:`functionevaluation`.
 
         """
-        if 'q' not in request.args or not request.args.get('q'):
-            return dict(message='Empty query parameter'), 400
-        # if parsing JSON fails, return a 400 error in JSON format
+        if 'functions' not in request.args:
+            detail = 'Must provide `functions` query parameter'
+            return error_response(400, detail=detail)
+        functions = request.args.get('functions')
+        if functions is None:
+            detail = '`functions` query parameter must not be empty'
+            return error_response(400, detail=detail)
         try:
-            data = json.loads(str(request.args.get('q'))) or {}
+            data = json.loads(str(functions)) or []
         except (TypeError, ValueError, OverflowError) as exception:
             current_app.logger.exception(str(exception))
-            return dict(message='Unable to decode data'), 400
+            detail = 'Unable to decode JSON in `functions` query parameter'
+            return error_response(400, detail=detail)
         try:
-            result = evaluate_functions(self.session, self.model,
-                                        data.get('functions', []))
-            if not result:
-                return {}, 204
-            return result
+            result = evaluate_functions(self.session, self.model, data)
+            return dict(data=result)
         except AttributeError as exception:
             current_app.logger.exception(str(exception))
-            message = 'No such field "{0}"'.format(exception.field)
-            return dict(message=message), 400
+            detail = 'No such field "{0}"'.format(exception.field)
+            return error_response(400, detail=detail)
+        except KeyError as exception:
+            current_app.logger.exception(str(exception))
+            return error_response(400, detail=str(exception))
         except OperationalError as exception:
             current_app.logger.exception(str(exception))
-            message = 'No such function "{0}"'.format(exception.function)
-            return dict(message=message), 400
+            detail = 'No such function "{0}"'.format(exception.function)
+            return error_response(400, detail=detail)
 
 
 class APIBase(ModelView):
@@ -1370,6 +1377,9 @@ class API(APIBase):
             return error_response(404, detail='No result found')
         except MultipleResultsFound:
             return error_response(404, detail='Multiple results found')
+        except ComparisonToNull as exception:
+            detail = str(exception)
+            return error_response(400, detail=detail)
         except Exception as exception:
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to construct query')
@@ -1613,26 +1623,32 @@ class API(APIBase):
                     # If the resource has a link with the name specified in
                     # `toinclude`, then get the type and IDs of that link.
                     if link in resource['links']:
-                        link_object = resource['links'][link]
-                        link_type = link_object['type']
-                        if isinstance(link_object, list):
-                            ids_to_link[link_type] |= \
-                                set(rel['id'] for rel in link_object)
+                        link_data = resource['links'][link]['linkage']
+                        if isinstance(link_data, list):
+                            for link_object in link_data:
+                                link_type = link_object['type']
+                                link_id = link_object['id']
+                                ids_to_link[link_type].add(link_id)
                         else:
-                            ids_to_link[link_type].add(link_object['id'])
+                            link_type = link_data['type']
+                            link_id = link_data['id']
+                            ids_to_link[link_type].add(link_id)
             # Otherwise, if there is just a single instance, look through
             # the links to get the IDs of the linked instances.
             else:
                 # If the resource has a link with the name specified in
                 # `toinclude`, then get the type and IDs of that link.
                 if link in original['links']:
-                    link_object = original['links'][link]
-                    link_type = link_object['type']
-                    if isinstance(link_object, list):
-                        ids_to_link[link_type] |= \
-                            set(rel['id'] for rel in link_object)
+                    link_data = original['links'][link]['linkage']
+                    if isinstance(link_data, list):
+                        for link_object in link_data:
+                            link_type = link_object['type']
+                            link_id = link_object['id']
+                            ids_to_link[link_type].add(link_id)
                     else:
-                        ids_to_link[link_type].add(link_object['id'])
+                        link_type = link_data['type']
+                        link_id = link_data['id']
+                        ids_to_link[link_type].add(link_id)
         return ids_to_link
 
     def get(self, instid, relationname, relationinstid):
@@ -2185,10 +2201,21 @@ class API(APIBase):
             # resource.
             if result is not None:
                 return result
+        # If we believe that the resource changes in ways other than the
+        # updates specified by the request, we must return 200 OK and a
+        # representation of the modified resource.
+        #
+        # TODO This should be checked just once, at instantiation time.
+        if changes_on_update(self.model):
+            result = dict(data=self.serialize(instance))
+            status = 200
+        else:
+            result = dict()
+            status = 204
         # Perform any necessary postprocessing.
         for postprocessor in self.postprocessors['PUT_SINGLE']:
             postprocessor()
-        return {}, 204
+        return result, status
 
 
 class RelationshipAPI(APIBase):
@@ -2229,39 +2256,34 @@ class RelationshipAPI(APIBase):
         related_value = getattr(instance, relationname)
         # Unwrap the data from the request.
         data = data.pop('data', {})
-        if 'type' not in data:
-            detail = 'Must specify correct data type'
-            return error_response(400, detail=detail)
-        if 'ids' not in data:
-            detail = 'Must specify resource IDs'
-            return error_response(400, detail=detail)
-        type_ = data.pop('type')
-        # The type name must match the collection name of model of the
-        # relation.
-        if type_ != collection_name(related_model):
-            detail = ('Type must be {0}, not'
-                      ' {1}').format(collection_name(related_model), type_)
-            return error_response(409, detail=detail)
-        ids = data.pop('ids')
-        # Get the new objects to add to the relation.
-        new_values = set(get_by(self.session, related_model, id_)
-                         for id_ in ids)
-        not_found = [id_ for id_, value in zip(ids, new_values)
-                     if value is None]
-        if not_found:
-            msg = 'No object of type {0} found with ID {1}'
-            errors = [error(detail=msg.format(type_, id_))
-                      for id_ in not_found]
-            return errors_response(404, errors)
-        try:
-            for new_value in new_values:
-                # Don't append a new value if it already exists in the to-many
-                # relationship.
-                if new_value not in related_value:
+        for rel in data:
+            if 'type' not in rel:
+                detail = 'Must specify correct data type'
+                return error_response(400, detail=detail)
+            if 'id' not in rel:
+                detail = 'Must specify resource ID'
+                return error_response(400, detail=detail)
+            type_ = rel['type']
+            # The type name must match the collection name of model of the
+            # relation.
+            if type_ != collection_name(related_model):
+                detail = ('Type must be {0}, not'
+                          ' {1}').format(collection_name(related_model), type_)
+                return error_response(409, detail=detail)
+            # Get the new objects to add to the relation.
+            new_value = get_by(self.session, related_model, rel['id'])
+            if new_value is None:
+                detail = ('No object of type {0} found with ID'
+                          ' {1}').format(type_, rel['id'])
+                return error_response(404, detail=detail)
+            # Don't append a new value if it already exists in the to-many
+            # relationship.
+            if new_value not in related_value:
+                try:
                     related_value.append(new_value)
-        except self.validation_exceptions as exception:
-            current_app.logger.exception(str(exception))
-            return self._handle_validation_exception(exception)
+                except self.validation_exceptions as exception:
+                    current_app.logger.exception(str(exception))
+                    return self._handle_validation_exception(exception)
         # TODO do we need to commit the session here?
         #
         #     self.session.commit()
@@ -2308,40 +2330,52 @@ class RelationshipAPI(APIBase):
             # TODO check that the relationship is a to-one relationship.
             setattr(instance, relationname, None)
         else:
-            if 'type' not in data:
-                detail = 'Must specify correct data type'
-                return error_response(400, detail=detail)
-            if 'id' not in data and 'ids' not in data:
-                detail = 'Must specify resource ID or IDs'
-                return error_response(400, detail=detail)
-            type_ = data.pop('type')
-            # The type name must match the collection name of model of the
-            # relation.
-            if type_ != collection_name(related_model):
-                detail = ('Type must be {0}, not'
-                          ' {1}').format(collection_name(related_model), type_)
-                return error_response(409, detail=detail)
-            # If there is just an 'id' key, we assume the client is trying to
-            # set a to-one relationship.
-            if 'id' in data:
-                id_ = data.pop('id')
-                # The new value with which to replace the current related value
-                replacement = get_by(self.session, related_model, id_)
-            # If there is an 'ids' key, we assume the client is trying to set a
+            # If this is a list, we assume the client is trying to set a
             # to-many relationship.
-            elif 'ids' in data:
+            if isinstance(data, list):
                 # Replacement of a to-many relationship may have been disabled
-                # by the user.
+                # on the server-side by the user.
                 if not self.allow_to_many_replacement:
-                    message = 'Not allowed to replace a to-many relationship'
-                    return error_response(403, detail=message)
-                ids = data.pop('ids')
-                # The new value with which to replace the current related value
-                replacement = [get_by(self.session, related_model, id_)
-                               for id_ in ids]
+                    detail = 'Not allowed to replace a to-many relationship'
+                    return error_response(403, detail=detail)
+                replacement = []
+                for rel in data:
+                    if 'type' not in rel:
+                        detail = 'Must specify correct data type'
+                        return error_response(400, detail=detail)
+                    if 'id' not in rel:
+                        detail = 'Must specify resource ID or IDs'
+                        return error_response(400, detail=detail)
+                    type_ = rel['type']
+                    # The type name must match the collection name of model of
+                    # the relation.
+                    if type_ != collection_name(related_model):
+                        detail = 'Type must be {0}, not {1}'
+                        detail = detail.format(collection_name(related_model),
+                                               type_)
+                        return error_response(409, detail=detail)
+                    id_ = rel['id']
+                    obj = get_by(self.session, related_model, id_)
+                    replacement.append(obj)
+            # Otherwise, we assume the client is trying to set a to-one
+            # relationship.
             else:
-                # TODO raise an error
-                pass
+                if 'type' not in data:
+                    detail = 'Must specify correct data type'
+                    return error_response(400, detail=detail)
+                if 'id' not in data:
+                    detail = 'Must specify resource ID or IDs'
+                    return error_response(400, detail=detail)
+                type_ = data['type']
+                # The type name must match the collection name of model of the
+                # relation.
+                if type_ != collection_name(related_model):
+                    detail = ('Type must be {0}, not'
+                              ' {1}').format(collection_name(related_model),
+                                             type_)
+                    return error_response(409, detail=detail)
+                id_ = data['id']
+                replacement = get_by(self.session, related_model, id_)
             # If the to-one relationship resource or any of the to-many
             # relationship resources do not exist, return an error response.
             if replacement is None:
@@ -2350,12 +2384,13 @@ class RelationshipAPI(APIBase):
                 return error_response(404, detail=detail)
             if (isinstance(replacement, list)
                 and any(value is None for value in replacement)):
-                not_found = (id_ for id_, value in zip(ids, replacement)
+                not_found = (rel for rel, value in zip(data, replacement)
                              if value is None)
-                msg = 'No object of type {0} found with ID {1}'
-                errors = [error(detail=msg.format(type_, id_))
-                          for id_ in not_found]
+                detail = 'No object of type {0} found with ID {1}'
+                errors = [error(detail=detail.format(rel['type'], rel['id']))
+                          for rel in not_found]
                 return errors_response(404, errors)
+            # Finally, set the relationship to have the new value.
             try:
                 setattr(instance, relationname, replacement)
             except self.validation_exceptions as exception:
@@ -2397,18 +2432,16 @@ class RelationshipAPI(APIBase):
         related_model = get_related_model(self.model, relationname)
         relation = getattr(instance, relationname)
         data = data.pop('data')
-        if 'type' not in data:
-            detail = 'Must specify correct data type'
-            return error_response(400, detail=detail)
-        if 'ids' not in data:
-            detail = 'Must specify resource IDs'
-            return error_response(400, detail=detail)
-        # type_ = data['type']
-        ids = data['ids']
-        toremove = set(get_by(self.session, related_model, id_) for id_ in ids)
-        for obj in toremove:
+        for rel in data:
+            if 'type' not in rel:
+                detail = 'Must specify correct data type'
+                return error_response(400, detail=detail)
+            if 'id' not in rel:
+                detail = 'Must specify resource ID'
+                return error_response(400, detail=detail)
+            toremove = get_by(self.session, related_model, rel['id'])
             try:
-                relation.remove(obj)
+                relation.remove(toremove)
             except ValueError:
                 # The JSON API specification requires that we silently ignore
                 # requests to delete nonexistent objects from a to-many

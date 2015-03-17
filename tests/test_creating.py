@@ -354,8 +354,9 @@ class TestCreating(ManagerTestBase):
         assert response.status_code == 201
         document = loads(response.data)
         person = document['data']
-        articles = person['links']['articles']
-        assert ['1', '2'] == sorted(articles['ids'])
+        articles = person['links']['articles']['linkage']
+        assert ['1', '2'] == sorted(article['id'] for article in articles)
+        assert all(article['type'] == 'article' for article in articles)
 
     def test_to_one(self):
         """Tests the creation of a model with a to-one relation."""
@@ -363,7 +364,7 @@ class TestCreating(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = {'data':
-                    {'type': 'person',
+                    {'type': 'article',
                      'links':
                          {'author': {'type': 'person', 'id': '1'}}
                      }
@@ -372,8 +373,8 @@ class TestCreating(ManagerTestBase):
         assert response.status_code == 201
         document = loads(response.data)
         article = document['data']
-        print('article:', article)
-        person = article['links']['author']
+        person = article['links']['author']['linkage']
+        assert person['type'] == 'person'
         assert person['id'] == '1'
 
     def test_unicode_primary_key(self):

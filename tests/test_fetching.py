@@ -90,7 +90,7 @@ class TestFetching(ManagerTestBase):
 
             @classmethod
             def query(cls):
-                return self.session.query(cls).filter_by(cls.id < 2)
+                return self.session.query(cls).filter(cls.id < 2)
 
         self.Article = Article
         self.Comment = Comment
@@ -190,25 +190,6 @@ class TestFetching(ManagerTestBase):
         people = document['data']
         assert ['1', '2'] == sorted(person['id'] for person in people)
 
-    def test_callable_query_attribute(self):
-        """Tests that a callable model.query attribute is being used when
-        available.
-
-        """
-
-        def query(cls):
-            return self.session.query(cls).filter(self.Person.id > 1)
-
-        self.Person.query = classmethod(query)
-        person1 = self.Person(id=1)
-        person2 = self.Person(id=2)
-        self.session.add_all([person1, person2])
-        self.session.commit()
-        response = self.app.get('/api/person')
-        document = loads(response.data)
-        people = document['data']
-        assert ['2'] == sorted(person['id'] for person in people)
-
     def test_specified_primary_key(self):
         """Tests that models with more than one primary key are accessible via
         a primary key specified by the server.
@@ -300,6 +281,7 @@ class TestFetching(ManagerTestBase):
         self.session.commit()
         response = self.app.get('/api/comment')
         document = loads(response.data)
+        print(document)
         comments = document['data']
         assert ['1'] == sorted(comment['id'] for comment in comments)
 
@@ -376,9 +358,9 @@ class TestDynamicRelationships(ManagerTestBase):
         response = self.app.get('/api/article/1')
         document = loads(response.data)
         article = document['data']
-        links = article['links']
-        author = links['author']
+        author = article['links']['author']['linkage']
         assert author['id'] == '1'
+        assert author['type'] == 'person'
 
     def test_to_many(self):
         """Tests for fetching a resource with a dynamic link to a to-many
@@ -437,8 +419,8 @@ class TestAssociationProxy(ManagerTestBase):
             id = Column(Integer, primary_key=True)
             tags = association_proxy('articletags', 'tag',
                                      creator=lambda tag: ArticleTag(tag=tag))
-            tag_names = association_proxy('tags', 'name',
-                                          creator=lambda name: Tag(name=name))
+            # tag_names = association_proxy('tags', 'name',
+            #                               creator=lambda name: Tag(name=name))
 
         class ArticleTag(self.Base):
             __tablename__ = 'articletag'
