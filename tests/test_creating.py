@@ -386,6 +386,46 @@ class TestCreating(ManagerTestBase):
         tag = document['data']
         assert tag['name'] == u'Юникод'
 
+    def test_primary_key_as_id(self):
+        """Tests the even if a primary key is not named ``id``, it still
+        appears in an ``id`` key in the response.
+
+        """
+        data = dict(data=dict(type='tag', name=u'foo'))
+        response = self.app.post('/api/tag', data=dumps(data))
+        assert response.status_code == 201
+        document = loads(response.data)
+        tag = document['data']
+        assert tag['id'] = u'foo'
+
+    # TODO Not supported right now.
+    #
+    # def test_treat_as_id(self):
+    #     """Tests for specifying one attribute in a compound primary key by
+    #     which to create a resource.
+
+    #     """
+    #     manager = APIManager(self.flaskapp, session=self.session)
+    #     manager.create_api(self.User, primary_key='email')
+    #     data = dict(data=dict(type='user', id=1))
+    #     response = self.app.post('/api/user', data=dumps(data))
+    #     document = loads(response.data)
+    #     user = document['data']
+    #     assert user['id'] == '1'
+    #     assert user['type'] == 'user'
+    #     assert user['email'] == 'foo'
+
+    def test_collection_name(self):
+        """Tests for creating a resource with an alternate collection name."""
+        self.manager.create_api(self.Person, methods=['POST'],
+                                collection_name='people')
+        data = dict(data=dict(type='people'))
+        response = self.app.post('/api/people', data=dumps(data))
+        assert response.status_code == 201
+        document = loads(response.data)
+        person = document['data']
+        assert person['type'] == 'people'
+
     # TODO This behavior is no longer supported
     #
     # def test_nested_relations(self):
@@ -398,6 +438,32 @@ class TestCreating(ManagerTestBase):
     #     response = self.app.get('/api/computer/2/programs')
     #     programs = loads(response.data)['objects']
     #     assert programs[0]['program']['name'] == 'iPhoto'
+
+    def test_custom_serialization(self):
+        """Tests for custom deserialization."""
+
+        temp = []
+
+        def serializer(instance):
+            result = to_dict(instance)
+            result['foo'] = temp.pop()
+            return result
+
+        def deserializer(data):
+            temp.append(data.pop('foo'))
+            instance = self.Person(**data)
+            return instance
+
+        self.manager.create_api(self.Person, methods=['POST'],
+                                serializer=serializer,
+                                deserializer=deserializer)
+        # POST will deserialize once and serialize once
+        data = dict(data=dict(type='person', id=1, foo='bar'))
+        response = self.app.post('/api/person', data=dumps(data))
+        assert response.status_code == 201
+        document = loads(response.data)
+        person = document['data']
+        assert data['foo'] == 'bar'
 
 
 class TestAssociationProxy(ManagerTestBase):

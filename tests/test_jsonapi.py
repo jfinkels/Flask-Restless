@@ -663,11 +663,11 @@ class TestPagination(ManagerTestBase):
                    for l in links)
 
 
-class TestFetchingResources(ManagerTestBase):
-    """Tests corresponding to the `Fetching Resources`_ section of the JSON API
+class TestFetchingData(ManagerTestBase):
+    """Tests corresponding to the `Fetching Data`_ section of the JSON API
     specification.
 
-    .. _Fetching Resources: http://jsonapi.org/format/#fetching
+    .. _Fetching Data: http://jsonapi.org/format/#fetching
 
     """
 
@@ -678,7 +678,7 @@ class TestFetchingResources(ManagerTestBase):
         and :class:`TestSupport.Article` models.
 
         """
-        super(TestFetchingResources, self).setUp()
+        super(TestFetchingData, self).setUp()
 
         class Article(self.Base):
             __tablename__ = 'article'
@@ -719,10 +719,10 @@ class TestFetchingResources(ManagerTestBase):
         """Tests that the server responds with a resource if the ``Accept``
         header specifies the JSON API media type.
 
-        For more information, see the `Fetching Resources`_ section of the JSON
-        API specification.
+        For more information, see the `Fetching Data`_ section of the JSON API
+        specification.
 
-        .. _Fetching Resources: http://jsonapi.org/format/#fetching
+        .. _Fetching Data: http://jsonapi.org/format/#fetching
 
         """
         # The fixtures for this test class set up the correct `Accept` header
@@ -735,10 +735,10 @@ class TestFetchingResources(ManagerTestBase):
         """Tests that the server responds with an :http:status:`415` if the
         ``Accept`` header is incorrect.
 
-        For more information, see the `Fetching Resources`_ section of the JSON
-        API specification.
+        For more information, see the `Fetching Data`_ section of the JSON API
+        specification.
 
-        .. _Fetching Resources: http://jsonapi.org/format/#fetching
+        .. _Fetching Data: http://jsonapi.org/format/#fetching
 
         """
         headers = dict(Accept='application/json')
@@ -746,8 +746,69 @@ class TestFetchingResources(ManagerTestBase):
         assert response.status_code == 406
         assert response.mimetype == CONTENT_TYPE
 
-    def test_to_many(self):
-        """Test for fetching resources from a to-many related resource URL."""
+    def test_empty_collection(self):
+        """Tests for fetching an empty collection of resources.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
+        response = self.app.get('/api/person')
+        assert response.status_code == 200
+        document = loads(response.data)
+        people = document['data']
+        assert people == []
+
+    def test_collection(self):
+        """Tests for fetching a collection of resources.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        response = self.app.get('/api/person')
+        assert response.status_code == 200
+        document = loads(response.data)
+        people = document['data']
+        assert ['1', '2'] == sorted(person['id'] for person in people)
+
+    def test_resource(self):
+        """Tests for fetching a single resource.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        response = self.app.get('/api/person/1')
+        assert response.status_code == 200
+        document = loads(response.data)
+        person = document['data']
+        assert person['id'] == '1'
+        assert person['type'] == 'person'
+
+    def test_to_many_related_resource_url(self):
+        """Tests for fetching to-many related resources from a related resource
+        URL.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
         person = self.Person(id=1)
         article1 = self.Article(id=1)
         article2 = self.Article(id=2)
@@ -758,19 +819,144 @@ class TestFetchingResources(ManagerTestBase):
         assert response.status_code == 200
         document = loads(response.data)
         articles = document['data']
-        assert ['1', '2'] == sorted(c['id'] for c in articles)
+        assert ['1', '2'] == sorted(article['id'] for article in articles)
+        assert all(article['type'] == 'article' for article in articles)
 
-    def test_to_one(self):
-        """Test for fetching resources from a to-one related resource URL."""
+    def test_to_one_related_resource_url(self):
+        """Tests for fetching a to-one related resource from a related resource
+        URL.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
         person = self.Person(id=1)
         article = self.Article(id=1)
         article.author = person
         self.session.add_all([person, article])
         self.session.commit()
         response = self.app.get('/api/article/1/author')
+        assert response.status_code == 200
+        document = loads(response.data)
+        author = document['data']
+        assert author['id'] == '1'
+        assert author['type'] == 'person'
+
+    def test_empty_to_many_related_resource_url(self):
+        """Tests for fetching an empty to-many related resource from a related
+        resource URL.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
+        person = self.Person(id=1)
+        self.session.add()
+        self.session.commit()
+        response = self.app.get('/api/article/1/author')
+        assert response.status_code == 200
+        document = loads(response.data)
+        author = document['data']
+        assert author is None
+
+    def test_empty_to_one_related_resource(self):
+        """Tests for fetching an empty to-one related resource from a related
+        resource URL.
+
+        For more information, see the `Fetching Resources`_ section of JSON API
+        specification.
+
+        .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
+
+        """
+        article = self.Article(id=1)
+        self.session.add(article)
+        self.session.commit()
+        response = self.app.get('/api/article/1/author')
+        assert response.status_code == 200
+        document = loads(response.data)
+        author = document['data']
+        assert author is None
+
+    def test_to_many_relationship_url(self):
+        """Test for fetching resources from a to-many relationship URL.
+
+        For more information, see the `Fetching Relationships`_ section of JSON
+        API specification.
+
+        .. _Fetching Relationships: http://jsonapi.org/format/#fetching-relationships
+
+        """
+        person = self.Person(id=1)
+        article1 = self.Article(id=1)
+        article2 = self.Article(id=2)
+        person.articles = [article1, article2]
+        self.session.add_all([person, article1, article2])
+        self.session.commit()
+        response = self.app.get('/api/person/1/links/articles')
+        assert response.status_code == 200
+        document = loads(response.data)
+        articles = document['data']
+        assert ['1', '2'] == sorted(article['id'] for article in articles)
+        assert all(article['type'] == 'article' for article in articles)
+
+    def test_empty_to_many_relationship_url(self):
+        """Test for fetching from an empty to-many relationship URL.
+
+        For more information, see the `Fetching Relationships`_ section of JSON
+        API specification.
+
+        .. _Fetching Relationships: http://jsonapi.org/format/#fetching-relationships
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        response = self.app.get('/api/person/1/links/articles')
+        assert response.status_code == 200
+        document = loads(response.data)
+        articles = document['data']
+        assert articles == []
+
+    def test_to_one_relationship_url(self):
+        """Test for fetching a resource from a to-one relationship URL.
+
+        For more information, see the `Fetching Relationships`_ section of JSON
+        API specification.
+
+        .. _Fetching Relationships: http://jsonapi.org/format/#fetching-relationships
+
+        """
+        person = self.Person(id=1)
+        article = self.Article(id=1)
+        article.author = person
+        self.session.add_all([person, article])
+        self.session.commit()
+        response = self.app.get('/api/article/1/links/author')
         document = loads(response.data)
         person = document['data']
         assert person['id'] == '1'
+
+    def test_empty_to_one_relationship_url(self):
+        """Test for fetching from an empty to-one relationship URL.
+
+        For more information, see the `Fetching Relationships`_ section of JSON
+        API specification.
+
+        .. _Fetching Relationships: http://jsonapi.org/format/#fetching-relationships
+
+        """
+        article = self.Article(id=1)
+        self.session.add(article)
+        self.session.commit()
+        response = self.app.get('/api/article/1/links/author')
+        document = loads(response.data)
+        person = document['data']
+        assert person is None
 
     def test_default_inclusion(self):
         """Tests that by default, Flask-Restless includes no information in

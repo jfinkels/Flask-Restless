@@ -15,7 +15,7 @@ from flask import Flask
 from flask import json
 try:
     from flask.ext.sqlalchemy import SQLAlchemy
-except:
+except ImportError:
     has_flask_sqlalchemy = False
 else:
     has_flask_sqlalchemy = True
@@ -30,15 +30,13 @@ from flask.ext.restless.helpers import to_dict
 from flask.ext.restless.helpers import get_columns
 
 from .helpers import DatabaseTestBase
+from .helpers import dumps
 from .helpers import FlaskTestBase
 from .helpers import force_json_contenttype
+from .helpers import loads
 from .helpers import skip_unless
 from .helpers import TestSupport
 from .helpers import unregister_fsa_session_signals
-
-
-dumps = json.dumps
-loads = json.loads
 
 
 class TestLocalAPIManager(DatabaseTestBase):
@@ -185,130 +183,55 @@ class TestLocalAPIManager(DatabaseTestBase):
         assert precount == postcount == 3
 
 
-class TestAPIManager(TestSupport):
+class TestAPIManager(ManagerTestBase):
     """Unit tests for the :class:`flask_restless.manager.APIManager` class."""
 
-    def test_constructor(self):
-        """Tests that no error occurs on instantiation without any arguments to
-        the constructor.
+    def setUp(self):
+        super(TestAPIManager, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+
+        class Tag(self.Base):
+            __tablename__ = 'tag'
+            name = Column(Unicode, primary_key=True)
+
+        self.Person = Person
+        self.Tag = Tag
+        self.Base.metadata.create_all()
+
+    def test_disallowed_methods(self):
+        """Tests that disallowed methods respond with :http:status:`405`."""
+        self.manager.create_api(self.Person, methods=[])
+        for method in 'get', 'post', 'put', 'delete':
+            func = getattr(self.app, method)
+            response = func('/api/person')
+            assert response.status_code == 405
+
+    @raises(IllegalArgumentError)
+    def test_missing_id(self):
+        """Tests that calling :meth:`APIManager.create_api` on a model without
+        an ``id`` column raises an exception.
 
         """
-        APIManager()
+        self.manager.create_api(self.Tag)
 
-    def test_create_api(self):
-        """Tests that the :meth:`flask_restless.manager.APIManager.create_api`
-        method creates endpoints which are accessible by the client, only allow
-        specified HTTP methods, and which provide a correct API to a database.
-
-        """
-        # create three different APIs for the same model
-        self.manager.create_api(self.Person, methods=['GET', 'POST'])
-        self.manager.create_api(self.Person, methods=['PATCH'],
-                                url_prefix='/api2')
-        self.manager.create_api(self.Person, methods=['GET'],
-                                url_prefix='/readonly')
-
-        # test that specified endpoints exist
-        response = self.app.post('/api/person', data=dumps(dict(name='foo')))
-        assert response.status_code == 201
-        assert loads(response.data)['id'] == 1
-        response = self.app.get('/api/person')
-        assert response.status_code == 200
-        assert len(loads(response.data)['objects']) == 1
-        assert loads(response.data)['objects'][0]['id'] == 1
-
-        # test that non-specified methods are not allowed
-        response = self.app.delete('/api/person/1')
-        assert response.status_code == 405
-        response = self.app.patch('/api/person/1',
-                                  data=dumps(dict(name='bar')))
-        assert response.status_code == 405
-
-        # test that specified endpoints exist
-        response = self.app.patch('/api2/person/1',
-                                  data=dumps(dict(name='bar')))
-        assert response.status_code == 200
-        assert loads(response.data)['id'] == 1
-        assert loads(response.data)['name'] == 'bar'
-
-        # test that non-specified methods are not allowed
-        response = self.app.get('/api2/person/1')
-        assert response.status_code == 405
-        response = self.app.delete('/api2/person/1')
-        assert response.status_code == 405
-        response = self.app.post('/api2/person',
-                                 data=dumps(dict(name='baz')))
-        assert response.status_code == 405
-
-        # test that the model is the same as before
-        response = self.app.get('/readonly/person')
-        assert response.status_code == 200
-        assert len(loads(response.data)['objects']) == 1
-        assert loads(response.data)['objects'][0]['id'] == 1
-        assert loads(response.data)['objects'][0]['name'] == 'bar'
-
-    def test_multi_pk(self):
-        """Test for specifying a primary key from a set of primary keys to use
-        when registering routes.
+    @raises(IllegalArgumentError)
+    def test_empty_collection_name(self):
+        """Tests that calling :meth:`APIManager.create_api` with an empty
+        collection name raises an exception.
 
         """
-        self.manager.create_api(self.User, methods=['GET', 'POST'],
-                                primary_key='email')
-        data = dict(id=1, email='foo')
-        response = self.app.post('/api/user', data=dumps(data))
-        assert response.status_code == 201
-        data = loads(response.data)
-        assert data['email'] == 'foo'
-
-        response = self.app.get('/api/user/foo')
-        assert response.status_code == 200
-        data = loads(response.data)
-        assert data['email'] == 'foo'
-        assert data['id'] == 1
-
-        # user should not be accessible at this URL
-        response = self.app.get('/api/user/1')
-        assert response.status_code == 404
-
-    def test_different_collection_name(self):
-        """Tests that providing a different collection name exposes the API at
-        the corresponding URL.
-
-        """
-        self.manager.create_api(self.Person, methods=['POST', 'GET'],
-                                collection_name='people')
-
-        response = self.app.post('/api/people', data=dumps(dict(name='foo')))
-        assert response.status_code == 201
-        assert loads(response.data)['id'] == 1
-
-        response = self.app.get('/api/people')
-        assert response.status_code == 200
-        assert len(loads(response.data)['objects']) == 1
-        assert loads(response.data)['objects'][0]['id'] == 1
-
-        response = self.app.get('/api/people/1')
-        assert response.status_code == 200
-        assert loads(response.data)['id'] == 1
-
-    def test_allow_functions(self):
-        """Tests that the ``allow_functions`` keyword argument makes a
-        :http:get:`/api/eval/...` endpoint available.
-
-        """
-        self.manager.create_api(self.Person, allow_functions=True)
-        response = self.app.get('/api/eval/person?q={}')
-        assert response.status_code != 400
-        assert response.status_code == 204
+        self.manager.create_api(self.Person, collection_name='')
 
     def test_disallow_functions(self):
-        """Tests that if the ``allow_functions`` keyword argument if ``False``,
-        no endpoint will be made available at :http:get:`/api/eval/...`.
+        """Tests that if the ``allow_functions`` keyword argument is ``False``,
+        no endpoint will be made available at :http:get:`/api/eval/:type`.
 
         """
         self.manager.create_api(self.Person, allow_functions=False)
         response = self.app.get('/api/eval/person')
-        assert response.status_code != 200
         assert response.status_code == 404
 
     def test_include_related(self):
@@ -590,163 +513,6 @@ class TestAPIManager(TestSupport):
         self.manager.create_api(self.Person, exclude_columns=['id'],
                                 methods=['POST'])
 
-    def test_different_urls(self):
-        """Tests that establishing different URL endpoints for the same model
-        affect the same database table.
-
-        """
-        methods = frozenset(('get', 'patch', 'post', 'delete'))
-        # create a separate endpoint for each HTTP method
-        for method in methods:
-            url = '/{0}'.format(method)
-            self.manager.create_api(self.Person, methods=[method.upper()],
-                                    url_prefix=url)
-
-        # test for correct requests
-        response = self.app.get('/get/person')
-        assert response.status_code == 200
-        response = self.app.post('/post/person', data=dumps(dict(name='Test')))
-        assert response.status_code == 201
-        response = self.app.patch('/patch/person/1',
-                                  data=dumps(dict(name='foo')))
-        assert response.status_code == 200
-        response = self.app.delete('/delete/person/1')
-        assert response.status_code == 204
-
-        # test for incorrect requests
-        response = self.app.get('/post/person')
-        assert response.status_code == 405
-        response = self.app.get('/patch/person/1')
-        assert response.status_code == 405
-        response = self.app.get('/delete/person/1')
-        assert response.status_code == 405
-
-        response = self.app.post('/get/person')
-        assert response.status_code == 405
-        response = self.app.post('/patch/person/1')
-        assert response.status_code == 405
-        response = self.app.post('/delete/person/1')
-        assert response.status_code == 405
-
-        response = self.app.patch('/get/person')
-        assert response.status_code == 405
-        response = self.app.patch('/post/person')
-        assert response.status_code == 405
-        response = self.app.patch('/delete/person/1')
-        assert response.status_code == 405
-
-        response = self.app.delete('/get/person')
-        assert response.status_code == 405
-        response = self.app.delete('/post/person')
-        assert response.status_code == 405
-        response = self.app.delete('/patch/person/1')
-        assert response.status_code == 405
-
-        # test that the same model is updated on all URLs
-        response = self.app.post('/post/person', data=dumps(dict(name='Test')))
-        assert response.status_code == 201
-        response = self.app.get('/get/person/1')
-        assert response.status_code == 200
-        assert loads(response.data)['name'] == 'Test'
-        response = self.app.patch('/patch/person/1',
-                                  data=dumps(dict(name='Foo')))
-        assert response.status_code == 200
-        response = self.app.get('/get/person/1')
-        assert response.status_code == 200
-        assert loads(response.data)['name'] == 'Foo'
-        response = self.app.delete('/delete/person/1')
-        assert response.status_code == 204
-        response = self.app.get('/get/person/1')
-        assert response.status_code == 404
-
-    def test_max_results_per_page(self):
-        """Test for specifying the ``max_results_per_page`` keyword argument.
-
-        """
-        self.manager.create_api(self.Person, methods=['GET', 'POST'],
-                                max_results_per_page=15)
-        for n in range(20):
-            response = self.app.post('/api/person', data=dumps({}))
-            assert 201 == response.status_code
-        response = self.app.get('/api/person?results_per_page=20')
-        assert 200 == response.status_code
-        data = loads(response.data)
-        assert 15 == len(data['objects'])
-
-    def test_expose_relations(self):
-        """Tests that relations are exposed at a URL which is a child of the
-        instance URL.
-
-        """
-        date = datetime.date(1999, 12, 31)
-        person = self.Person(name=u'Test', age=10, other=20, birth_date=date)
-        computer = self.Computer(name=u'foo', vendor=u'bar', buy_date=date)
-        self.session.add(person)
-        person.computers.append(computer)
-        self.session.commit()
-
-        self.manager.create_api(self.Person)
-        response = self.app.get('/api/person/1/computers')
-        assert 200 == response.status_code
-        data = loads(response.data)
-        assert 'objects' in data
-        assert 1 == len(data['objects'])
-        assert 'foo' == data['objects'][0]['name']
-
-    def test_expose_lazy_relations(self):
-        """Tests that lazy relations are exposed at a URL which is a child of
-        the instance URL.
-
-        """
-        person = self.LazyPerson(name=u'Test')
-        computer = self.LazyComputer(name=u'foo')
-        self.session.add(person)
-        person.computers.append(computer)
-        self.session.commit()
-
-        self.manager.create_api(self.LazyPerson)
-        response = self.app.get('/api/lazyperson/1/computers')
-        assert 200 == response.status_code
-        data = loads(response.data)
-        assert 'objects' in data
-        assert 1 == len(data['objects'])
-        assert 'foo' == data['objects'][0]['name']
-
-
-class TestSerialization(TestSupport):
-
-    def serializer(self, instance):
-        result = to_dict(instance)
-        # Add extra information.
-        result['foo'] = 'bar'
-        return result
-
-    def deserializer(self, data):
-        # Remove the extra information.
-        data.pop('foo')
-        instance = self.Person(**data)
-        return instance
-
-    def test_custom_serializer_get(self):
-        self.session.add(self.Person(id=1))
-        self.session.commit()
-        self.manager.create_api(self.Person, methods=['GET'],
-                                serializer=self.serializer)
-        response = self.app.get('/api/person/1')
-        assert response.status_code == 200
-        data = loads(response.data)
-        assert data['foo'] == 'bar'
-
-    def test_custom_serializer_post(self):
-        self.manager.create_api(self.Person, methods=['POST'],
-                                serializer=self.serializer,
-                                deserializer=self.deserializer)
-        # POST will deserialize once and serialize once
-        response = self.app.post('/api/person',
-                                 data=dumps(dict(id=1, foo='bar')))
-        assert response.status_code == 201
-        data = loads(response.data)
-        assert data['foo'] == 'bar'
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')

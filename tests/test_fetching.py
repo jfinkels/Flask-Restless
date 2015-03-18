@@ -92,10 +92,16 @@ class TestFetching(ManagerTestBase):
             def query(cls):
                 return self.session.query(cls).filter(cls.id < 2)
 
+        class User(self.Base):
+            __tablename__ = 'user'
+            id = Column(Integer, primary_key=True)
+            email = Column(Unicode, primary_key=True)
+
         self.Article = Article
         self.Comment = Comment
         self.Person = Person
         self.Tag = Tag
+        self.User = User
         self.Base.metadata.create_all()
         self.manager.create_api(Article)
         self.manager.create_api(Comment)
@@ -138,32 +144,6 @@ class TestFetching(ManagerTestBase):
         person = document['data']
         assert person['birthday'] == now.isoformat()
 
-    def test_alternate_primary_key(self):
-        """Tests that models with primary keys that are not named ``id`` are
-        are still accessible via their primary keys.
-
-        """
-        tag = self.Tag(name=u'foo')
-        self.session.add(tag)
-        self.session.commit()
-        response = self.app.get('/api/tag/foo')
-        document = loads(response.data)
-        tag = document['data']
-        assert tag['id'] == 'foo'
-
-    def test_primary_key_int_string(self):
-        """Tests for getting a resource that has a string primary key,
-        including the possibility of a string representation of a number.
-
-        """
-        tag = self.Tag(name=u'1')
-        self.session.add(tag)
-        self.session.commit()
-        response = self.app.get('/api/tag/1')
-        document = loads(response.data)
-        tag = document['data']
-        assert tag['name'] == '1'
-
     def test_jsonp(self):
         """Test for a JSON-P callback on a single resource request."""
         person1 = self.Person(id=1)
@@ -190,25 +170,54 @@ class TestFetching(ManagerTestBase):
         people = document['data']
         assert ['1', '2'] == sorted(person['id'] for person in people)
 
-    def test_specified_primary_key(self):
-        """Tests that models with more than one primary key are accessible via
-        a primary key specified by the server.
+    def test_alternate_primary_key(self):
+        """Tests that models with primary keys that are not named ``id`` are
+        are still accessible via their primary keys.
 
         """
-        article = self.Article(id=1, title='foo')
-        self.session.add(article)
+        tag = self.Tag(name=u'foo')
+        self.session.add(tag)
         self.session.commit()
-        self.manager.create_api(self.Article, url_prefix='/api2',
-                                primary_key='title')
-        response = self.app.get('/api2/article/1')
-        assert response.status_code == 404
-        response = self.app.get('/api2/article/foo')
-        assert response.status_code == 200
+        response = self.app.get('/api/tag/foo')
         document = loads(response.data)
-        resource = document['data']
-        # Resource objects must have string IDs.
-        assert resource['id'] == str(article.id)
-        assert resource['title'] == article.title
+        tag = document['data']
+        assert tag['id'] == 'foo'
+
+    def test_primary_key_int_string(self):
+        """Tests for getting a resource that has a string primary key,
+        including the possibility of a string representation of a number.
+
+        """
+        tag = self.Tag(name=u'1')
+        self.session.add(tag)
+        self.session.commit()
+        response = self.app.get('/api/tag/1')
+        document = loads(response.data)
+        tag = document['data']
+        assert tag['name'] == '1'
+        assert tag['id'] == '1'
+
+    # TODO Not supported right now.
+    #
+    # def test_specified_primary_key(self):
+    #     """Tests that models with more than one primary key are accessible via
+    #     a primary key specified by the server.
+
+    #     """
+    #     article = self.Article(id=1, title='foo')
+    #     self.session.add(article)
+    #     self.session.commit()
+    #     self.manager.create_api(self.Article, url_prefix='/api2',
+    #                             primary_key='title')
+    #     response = self.app.get('/api2/article/1')
+    #     assert response.status_code == 404
+    #     response = self.app.get('/api2/article/foo')
+    #     assert response.status_code == 200
+    #     document = loads(response.data)
+    #     resource = document['data']
+    #     # Resource objects must have string IDs.
+    #     assert resource['id'] == str(article.id)
+    #     assert resource['title'] == article.title
 
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`200` if the
@@ -315,6 +324,57 @@ class TestFetching(ManagerTestBase):
         articles = document['data']
         assert False, 'Not implemented'
 
+    def test_collection_name_single(self):
+        """Tests for fetching a single resource with an alternate collection
+        name.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, collection_name='people')
+        response = self.app.get('/api/people/1')
+        assert response.status_code == 200
+        document = loads(response.data)
+        person = document['data']
+        assert person['id'] == '1'
+        assert person['type'] == 'people'
+
+    def test_collection_name_multiple(self):
+        """Tests for fetching multiple resources with an alternate collection
+        name.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, collection_name='people')
+        response = self.app.get('/api/people')
+        assert response.status_code == 200
+        document = loads(response.data)
+        people = document['data']
+        assert len(people) == 1
+        person = people[0]
+        assert person['id'] == '1'
+        assert person['type'] == 'people'
+
+    def test_custom_serialization(self):
+        """Tests for a custom serialization function."""
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        def serializer(instance):
+            result = to_dict(instance)
+            result['foo'] = 'bar'
+            return result
+
+        self.manager.create_api(self.Person, serializer=serializer)
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert person['foo'] == 'bar'
+
 
 class TestDynamicRelationships(ManagerTestBase):
     """Tests for fetching resources from dynamic to-many relationships."""
@@ -381,7 +441,7 @@ class TestDynamicRelationships(ManagerTestBase):
         articles = links['articles']['linkage']
         assert ['1', '2'] == sorted(article['id'] for article in articles)
 
-    def test_to_many_resource_url(self):
+    def test_related_resource_url(self):
         """Tests for fetching a resource with a dynamic link to a to-many
         relation from the related resource URL.
 
@@ -397,6 +457,25 @@ class TestDynamicRelationships(ManagerTestBase):
         document = loads(response.data)
         articles = document['data']
         assert ['1', '2'] == sorted(article['id'] for article in articles)
+        assert all(article['type'] == 'article' for article in articles)
+
+    def test_relationship_url(self):
+        """Tests for fetching a resource with a dynamic link to a to-many
+        relation from the relationship URL.
+
+        """
+        person = self.Person(id=1)
+        article1 = self.Article(id=1)
+        article2 = self.Article(id=2)
+        article1.author = person
+        article2.author = person
+        self.session.add_all([person, article1, article2])
+        self.session.commit()
+        response = self.app.get('/api/person/1/links/articles')
+        document = loads(response.data)
+        articles = document['data']
+        assert ['1', '2'] == sorted(article['id'] for article in articles)
+        assert all(article['type'] == 'article' for article in articles)
 
 
 class TestAssociationProxy(ManagerTestBase):

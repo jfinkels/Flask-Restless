@@ -310,6 +310,34 @@ class TestUpdating(ManagerTestBase):
         assert interval.end == 9
         assert interval.radius == 2
 
+    def test_collection_name(self):
+        """Tests for updating a resource with an alternate collection name."""
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, methods=['PUT'],
+                                collection_name='people')
+        data = dict(data=dict(type='people', id=1, name='foo'))
+        response = self.app.put('/api/people/1', data=dumps(data))
+        assert response.status_code == 204
+        assert person.name == 'foo'
+
+    def test_different_endpoints(self):
+        """Tests for updating the same resource from different endpoints."""
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, methods=['PUT'],
+                                url_prefix='/api2')
+        data = dict(data=dict(type='people', name='foo'))
+        response = self.app.put('/api/people/1', data=dumps(data))
+        assert response.status_code == 204
+        assert person.name == 'foo'
+        data = dict(data=dict(type='people', name='bar'))
+        response = self.app.put('/api2/people/1', data=dumps(data))
+        assert response.status_code == 204
+        assert person.name == 'bar'
+
     # def test_content_type(self):
     #     """Tests that the server responds only to requests with a JSON
     #     Content-Type.
