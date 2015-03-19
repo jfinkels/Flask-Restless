@@ -21,7 +21,6 @@ else:
     def isclass(obj):
         return isinstance(obj, type)
 
-import datetime
 import functools
 import uuid
 
@@ -34,30 +33,15 @@ except ImportError:
 else:
     has_flask_sqlalchemy = True
 from nose import SkipTest
-from sqlalchemy import Boolean
-from sqlalchemy import Column
 from sqlalchemy import create_engine
-from sqlalchemy import Date
-from sqlalchemy import DateTime
 from sqlalchemy import event
-from sqlalchemy import Float
-from sqlalchemy import ForeignKey
-from sqlalchemy import Integer
-from sqlalchemy import Interval
-from sqlalchemy import select
-from sqlalchemy import Time
-from sqlalchemy import Unicode
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import backref
-from sqlalchemy.orm import relationship
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session as SessionBase
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import TypeDecorator
-from sqlalchemy.ext.associationproxy import association_proxy
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
