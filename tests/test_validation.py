@@ -37,15 +37,6 @@ from .helpers import ManagerTestBase
 from .helpers import skip_unless
 
 
-#: A regular expression for email addresses.
-# EMAIL_REGEX = re.compile("[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^"
-#                          "_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a"
-#                          "-z0-9](?:[a-z0-9-]*[a-z0-9])")
-
-# dumps = json.dumps
-# loads = json.loads
-
-
 class TestSimpleValidation(ManagerTestBase):
     """Tests for validation errors raised by the SQLAlchemy's simple built-in
     validation.
