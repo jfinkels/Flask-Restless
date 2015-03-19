@@ -20,8 +20,11 @@ else:
     has_flask_sqlalchemy = True
 from nose.tools import raises
 from sqlalchemy import Column
+from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy import Unicode
+from sqlalchemy.orm import backref
+from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import url_for
@@ -44,6 +47,7 @@ class TestLocalAPIManager(DatabaseTestBase):
     yet been instantiated.
 
     """
+
     def setUp(self):
         super(TestLocalAPIManager, self).setUp()
 
@@ -51,28 +55,13 @@ class TestLocalAPIManager(DatabaseTestBase):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
 
-        class Computer(self.Base):
-            __tablename__ = 'computer'
+        class Article(self.Base):
+            __tablename__ = 'article'
             id = Column(Integer, primary_key=True)
 
         self.Person = Person
-        self.Computer = Computer
+        self.Article = Article
         self.Base.metadata.create_all()
-
-    def test_url_for(self):
-        manager = APIManager(self.flaskapp, session=self.session)
-        manager.create_api(self.Person, collection_name='people')
-        manager.create_api(self.Computer, collection_name='computers')
-        with self.flaskapp.app_context():
-            url = url_for(self.Computer)
-            assert url.endswith('/api/computers')
-            assert url_for(self.Person).endswith('/api/people')
-            assert url_for(self.Person, instid=1).endswith('/api/people/1')
-            url = url_for(self.Person, instid=1, relationname='computers')
-            assert url.endswith('/api/people/1/computers')
-            url = url_for(self.Person, instid=1, relationname='computers',
-                          relationinstid=2)
-            assert url.endswith('/api/people/1/computers/2')
 
     def test_init_app(self):
         """Tests for initializing the Flask application after instantiating the
@@ -102,14 +91,14 @@ class TestLocalAPIManager(DatabaseTestBase):
         manager.init_app(flaskapp1)
         manager.init_app(flaskapp2)
         manager.create_api(self.Person, app=flaskapp1)
-        manager.create_api(self.Computer, app=flaskapp2)
+        manager.create_api(self.Article, app=flaskapp2)
         response = testclient1.get('/api/person')
         assert response.status_code == 200
-        response = testclient1.get('/api/computer')
+        response = testclient1.get('/api/article')
         assert response.status_code == 404
         response = testclient2.get('/api/person')
         assert response.status_code == 404
-        response = testclient2.get('/api/computer')
+        response = testclient2.get('/api/article')
         assert response.status_code == 200
 
     def test_creation_api_without_app_dependency(self):
@@ -132,19 +121,19 @@ class TestLocalAPIManager(DatabaseTestBase):
 
         # First create the API, then initialize the Flask applications after.
         manager.create_api(self.Person, app=flaskapp1)
-        manager.create_api(self.Computer, app=flaskapp2)
+        manager.create_api(self.Article, app=flaskapp2)
         manager.init_app(flaskapp1)
         manager.init_app(flaskapp2)
 
         # Tests that only the first Flask application gets requests for
-        # /api/person and only the second gets requests for /api/computer.
+        # /api/person and only the second gets requests for /api/article.
         response = testclient1.get('/api/person')
         assert response.status_code == 200
-        response = testclient1.get('/api/computer')
+        response = testclient1.get('/api/article')
         assert response.status_code == 404
         response = testclient2.get('/api/person')
         assert response.status_code == 404
-        response = testclient2.get('/api/computer')
+        response = testclient2.get('/api/article')
         assert response.status_code == 200
 
     def test_universal_preprocessor(self):
@@ -152,34 +141,26 @@ class TestLocalAPIManager(DatabaseTestBase):
         methods created with the API manager.
 
         """
-        class Counter(object):
-            def __init__(s):
-                s.count = 0
+        counter1 = 0
+        counter2 = 0
 
-            def increment(s):
-                s.count += 1
+        def increment1(**kw):
+            counter1 += 1
 
-            def __eq__(s, o):
-                return s.count == o.count if isinstance(o, Counter) \
-                    else s.count == o
-        precount = Counter()
-        postcount = Counter()
+        def increment2(**kw):
+            counter2 += 1
 
-        def preget(**kw):
-            precount.increment()
-
-        def postget(**kw):
-            postcount.increment()
-
+        preprocessors = dict(GET_COLLECTION=[increment1])
+        postprocessors = dict(GET_COLLECTION=[increment2])
         manager = APIManager(self.flaskapp, session=self.session,
-                             preprocessors=dict(GET_MANY=[preget]),
-                             postprocessors=dict(GET_MANY=[postget]))
+                             preprocessors=preprocessors,
+                             postprocessors=postprocessors)
         manager.create_api(self.Person)
-        manager.create_api(self.Computer)
+        manager.create_api(self.Article)
         self.app.get('/api/person')
         self.app.get('/api/computer')
         self.app.get('/api/person')
-        assert precount == postcount == 3
+        assert counter1 == counter2 == 3
 
 
 class TestAPIManager(ManagerTestBase):
@@ -192,13 +173,35 @@ class TestAPIManager(ManagerTestBase):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
 
+        class Article(self.Base):
+            __tablename__ = 'article'
+            id = Column(Integer, primary_key=True)
+            author = relationship(Person, backref=backref('articles'))
+            author_id = Column(Integer, ForeignKey('person.id'))
+
         class Tag(self.Base):
             __tablename__ = 'tag'
             name = Column(Unicode, primary_key=True)
 
+        self.Article = Article
         self.Person = Person
         self.Tag = Tag
         self.Base.metadata.create_all()
+
+    def test_url_for(self):
+        """Tests the global :func:`flask.ext.restless.url_for` function."""
+        self.manager.create_api(self.Person, collection_name='people')
+        self.manager.create_api(self.Article, collection_name='articles')
+        with self.flaskapp.app_context():
+            url1 = url_for(self.Person)
+            url2 = url_for(self.Person, instid=1)
+            url3 = url_for(self.Person, instid=1, relationname='articles')
+            url4 = url_for(self.Person, instid=1, relationname='articles',
+                           relationinstid=2)
+            assert url1.endswith('/api/people')
+            assert url2.endswith('/api/people/1')
+            assert url3.endswith('/api/people/1/articles')
+            assert url4.endswith('/api/people/1/articles/2')
 
     def test_disallowed_methods(self):
         """Tests that disallowed methods respond with :http:status:`405`."""
