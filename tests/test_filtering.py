@@ -52,6 +52,7 @@ class SearchTestBase(ManagerTestBase):
         target_url = '{0}?filter[objects]={1}'.format(url, dumps(filters))
         if single is not None:
             target_url += '&filter[single]={0}'.format(1 if single else 0)
+        # TODO change this to use get(url, query_string=dict(...))
         return self.app.get(target_url)
 
 

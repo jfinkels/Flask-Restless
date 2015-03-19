@@ -22,6 +22,12 @@ from datetime import timedelta
 from datetime import datetime
 
 import dateutil
+try:
+    from flask.ext.sqlalchemy import SQLAlchemy
+except:
+    has_flask_sqlalchemy = False
+else:
+    has_flask_sqlalchemy = True
 from sqlalchemy import Column
 from sqlalchemy import Date
 from sqlalchemy import DateTime
@@ -38,10 +44,12 @@ from sqlalchemy.orm import relationship
 from flask.ext.restless import CONTENT_TYPE
 
 from .helpers import dumps
+from .helpers import DatabaseTestBase
 from .helpers import loads
 from .helpers import ManagerTestBase
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
+from .helpers import unregister_fsa_session_signals
 
 
 class TestCreating(ManagerTestBase):
@@ -466,6 +474,43 @@ class TestCreating(ManagerTestBase):
         assert data['foo'] == 'bar'
 
 
+class TestProcessors(DatabaseTestBase):
+    """Tests for pre- and postprocessors."""
+
+    def setUp(self):
+        super(TestProcessors, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+
+        self.Person = Person
+        self.Base.metadata.create_all()
+        self.manager.create_api(Person)
+
+    def test_preprocessor(self):
+        """Tests :http:method:`post` requests with a preprocessor function."""
+
+        def set_name(data=None, **kw):
+            """Sets the name attribute of the incoming data object, regardless
+            of the value requested by the client.
+
+            """
+            if data is not None:
+                data['name'] = 'bar'
+
+        preprocessors = dict(POST=[set_name])
+        self.manager.create_api(self.Person, methods=['POST'],
+                                preprocessors=preprocessors)
+        data = dict(data=dict(type='person', name='foo'))
+        response = self.app.post('/api/person', data=dumps(data))
+        assert response.status_code == 201
+        document = loads(response.data)
+        person = document['data']
+        assert person['name'] == 'bar'
+
+
 class TestAssociationProxy(ManagerTestBase):
     """Tests for creating an object with a relationship using an association
     proxy.
@@ -561,3 +606,42 @@ class TestAssociationProxy(ManagerTestBase):
 
         """
         assert False, 'Not implemented'
+
+
+@skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
+class TestFlaskSqlalchemy(FlaskTestBase):
+    """Tests for creating resources defined as Flask-SQLAlchemy models instead
+    of pure SQLAlchemy models.
+
+    """
+
+    def setUp(self):
+        """Creates the Flask-SQLAlchemy database and models."""
+        super(TestFlaskSqlalchemy, self).setUp()
+        self.db = SQLAlchemy(self.flaskapp)
+
+        class Person(self.db.Model):
+            id = self.db.Column(self.db.Integer, primary_key=True)
+
+        self.Person = Person
+        self.db.create_all()
+        self.manager = APIManager(self.flaskapp, flask_sqlalchemy_db=self.db)
+        self.manager.create_api(self.Person, methods=['POST'])
+
+    def tearDown(self):
+        """Drops all tables and unregisters Flask-SQLAlchemy session signals.
+
+        """
+        self.db.drop_all()
+        unregister_fsa_session_signals()
+
+    def test_create(self):
+        """Tests for creating a resource."""
+        data = dict(data=dict(type='person'))
+        response = self.app.post('/api/person', data=dumps(data))
+        assert response.status_code == 201
+        document = loads(response.data)
+        person = document['data']
+        # TODO To make this test more robust, should query for person objects.
+        assert person['id'] == '1'
+        assert person['type'] == 'person'

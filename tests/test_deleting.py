@@ -14,6 +14,12 @@
     :license: GNU AGPLv3+ or BSD
 
 """
+try:
+    from flask.ext.sqlalchemy import SQLAlchemy
+except ImportError:
+    has_flask_sqlalchemy = False
+else:
+    has_flask_sqlalchemy = True
 from sqlalchemy import Column
 from sqlalchemy import Integer
 
@@ -23,6 +29,7 @@ from .helpers import dumps
 from .helpers import ManagerTestBase
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
+from .helpers import unregister_fsa_session_signals
 
 
 class TestDeleting(ManagerTestBase):
@@ -130,7 +137,7 @@ class TestDeleting(ManagerTestBase):
         response = self.app.delete('/api/person')
         assert response.status_code == 405
 
-    def test_delete_collection(self):
+    def test_collection(self):
         """Tests for deleting all instances of a collection.
 
         Deleting an entire collection is not discussed in the JSON API
@@ -142,10 +149,24 @@ class TestDeleting(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['DELETE'],
                                 allow_delete_many=True, url_prefix='/api2')
         response = self.app.delete('/api2/person')
-        assert response.status_code == 204
+        assert response.status_code == 200
+        document = loads(response.data)
+        assert document['meta']['total'] == 3
         assert self.session.query(self.Person).count() == 0
 
-    def test_delete_many_filtered(self):
+    def test_empty_collection(self):
+        """Tests that deleting an empty collection still yields a
+        :http:status:`200` response.
+
+        """
+        self.manager.create_api(self.Person, methods=['DELETE'],
+                                allow_delete_many=True, url_prefix='/api2')
+        response = self.app.delete('/api2/person')
+        assert response.status_code == 200
+        document = loads(response.data)
+        assert document['meta']['total'] == 0
+
+    def test_filtered_collection(self):
         """Tests for deleting instances of a collection selected by filters.
 
         Deleting from a collection is not discussed in the JSON API
@@ -162,11 +183,12 @@ class TestDeleting(ManagerTestBase):
         filters = [dict(name='id', op='lt', val=3)]
         url = '/api2/person?filter[objects]={0}'.format(dumps(filters))
         response = self.app.delete(url)
-        print(response.data)
-        assert response.status_code == 204
+        assert response.status_code == 200
+        document = loads(response.data)
+        assert document['meta']['total'] == 2
         assert [person3] == self.session.query(self.Person).all()
 
-    def test_delete_integrity_error(self):
+    def test_integrity_error(self):
         """Tests that an :exc:`IntegrityError` raised in a
         :http:method:`delete` request is caught and returned to the client
         safely.
@@ -174,7 +196,7 @@ class TestDeleting(ManagerTestBase):
         """
         assert False, 'Not implemented'
 
-    def test_delete_nonexistent_instance(self):
+    def test_nonexistent_instance(self):
         """Tests that a request to delete a nonexistent resource yields a
         :http:status:`404 response.
 
@@ -222,3 +244,130 @@ class TestDeleting(ManagerTestBase):
     #     # response = self.app.get('/api/computers')
     #     # assert response.status_code == 200
     #     # assert len(loads(response.data)['objects']) == 0
+
+
+class TestProcessors(DatabaseTestBase):
+    """Tests for pre- and postprocessors."""
+
+    def setUp(self):
+        super(TestProcessors, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+
+        self.Person = Person
+        self.Base.metadata.create_all()
+        self.manager.create_api(Person)
+
+    def test_change_id(self):
+        """Tests that a return value from a preprocessor overrides the ID of
+        the resource to fetch as given in the request URL.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        def increment_id(instance_id=None, **kw):
+            if instance_id is None:
+                raise ProcessingException(code=400)
+            return int(instance_id) + 1
+
+        preprocessors = dict(DELETE=[increment_id])
+        self.manager.create_api(self.Person, methods=['DELETE'],
+                                preprocessors=preprocessors)
+        response = self.app.delete('/api/person/0')
+        assert response.status_code == 204
+        assert self.session.query(self.Person).count() == 0
+
+    def test_processing_exception(self):
+        """Tests for a preprocessor that raises a :exc:`ProcessingException`
+        when deleting a single resource.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        def forbidden(**kw):
+            raise ProcessingException(code=403, description='forbidden')
+
+        preprocessors = dict(DELETE=[forbidden])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        response = self.app.delete('/api/person/1')
+        assert response.status_code == 403
+        document = loads(response.data)
+        errors = document['errors']
+        assert len(errors) == 1
+        error = errors[0]
+        assert 'forbidden' == error['detail']
+        # Ensure that the person has not been deleted.
+        assert self.session.query(self.Person).first() == person
+
+    def test_collection_preprocessor(self):
+        """Tests for a preprocessor on a request to delete a collection."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+
+        def restrict_ids(filters=None, **kw):
+            """Adds an additional filter to any existing filters that restricts
+            which resources appear in the response.
+
+            """
+            if filters is None:
+                raise ProcessingException(code=400)
+            filt = dict(name='id', op='lt', val=2)
+            filters.append(filt)
+
+        preprocessors = dict(DELETE=[restrict_ids])
+        self.manager.create_api(self.Person, methods=['DELETE'],
+                                allow_delete_many=True,
+                                preprocessors=preprocessors)
+        response = self.app.delete('/api/person')
+        assert response.status_code == 200
+        document = loads(response.data)
+        assert document['meta']['total'] == 1
+        # Ensure that person1 was deleted.
+        assert [person2] == self.session.query(self.Person).all()
+
+
+@skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
+class TestFlaskSqlalchemy(FlaskTestBase):
+    """Tests for deleting resources defined as Flask-SQLAlchemy models instead
+    of pure SQLAlchemy models.
+
+    """
+
+    def setUp(self):
+        """Creates the Flask-SQLAlchemy database and models."""
+        super(TestFlaskSqlalchemy, self).setUp()
+        self.db = SQLAlchemy(self.flaskapp)
+        self.session = self.db.session
+
+        class Person(self.db.Model):
+            id = self.db.Column(self.db.Integer, primary_key=True)
+
+        self.Person = Person
+        self.db.create_all()
+        self.manager = APIManager(self.flaskapp, flask_sqlalchemy_db=self.db)
+        self.manager.create_api(self.Person, methods=['DELETE'])
+
+    def tearDown(self):
+        """Drops all tables and unregisters Flask-SQLAlchemy session signals.
+
+        """
+        self.db.drop_all()
+        unregister_fsa_session_signals()
+
+    def test_create(self):
+        """Tests for deleting a resource."""
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        response = self.app.delete('/api/person/1')
+        assert response.status_code == 204
+        assert self.Person.query.count() == 0

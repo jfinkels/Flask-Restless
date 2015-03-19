@@ -18,6 +18,12 @@ from __future__ import division
 
 from datetime import datetime
 from datetime import time
+try:
+    from flask.ext.sqlalchemy import SQLAlchemy
+except ImportError:
+    has_flask_sqlalchemy = False
+else:
+    has_flask_sqlalchemy = True
 from json import JSONEncoder
 
 from sqlalchemy import Column
@@ -35,10 +41,12 @@ from sqlalchemy.orm.collections import attribute_mapped_collection as amc
 
 from flask.ext.restless import CONTENT_TYPE
 
+from .helpers import DatabaseTestBase
 from .helpers import dumps
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
 from .helpers import ManagerTestBase
+from .helpers import unregister_fsa_session_signals
 
 
 class TestUpdating(ManagerTestBase):
@@ -809,6 +817,125 @@ class TestUpdating(ManagerTestBase):
     #     assert resp.status_code == 404
 
 
+class TestProcessors(DatabaseTestBase):
+    """Tests for pre- and postprocessors."""
+
+    def setUp(self):
+        super(TestProcessors, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+
+        self.Person = Person
+        self.Base.metadata.create_all()
+        self.manager.create_api(Person)
+
+    def test_change_id(self):
+        """Tests that a return value from a preprocessor overrides the ID of
+        the resource to fetch as given in the request URL.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        def increment_id(instance_id=None, **kw):
+            if instance_id is None:
+                raise ProcessingException(code=400)
+            return int(instance_id) + 1
+
+        preprocessors = dict(PUT=[increment_id])
+        self.manager.create_api(self.Person, methods=['PUT'],
+                                preprocessors=preprocessors)
+        data = dict(data=dict(type='person', id='1', name='foo'))
+        response = self.app.put('/api/person/0', data=dumps(data))
+        assert response.status_code == 204
+        assert person.name == 'foo'
+
+    def test_single_resource_processing_exception(self):
+        """Tests for a preprocessor that raises a :exc:`ProcessingException`
+        when updating a single resource.
+
+        """
+        person = self.Person(id=1, name='foo')
+        self.session.add(person)
+        self.session.commit()
+
+        def forbidden(**kw):
+            raise ProcessingException(code=403, description='forbidden')
+
+        preprocessors = dict(PUT=[forbidden])
+        self.manager.create_api(self.Person, methods=['PUT'],
+                                preprocessors=preprocessors)
+        data = dict(data=dict(type='person', id='1', name='bar'))
+        response = self.app.put('/api/person/1', data=dumps(data))
+        assert response.status_code == 403
+        document = loads(response.data)
+        errors = document['errors']
+        assert len(errors) == 1
+        error = errors[0]
+        assert 'forbidden' == error['detail']
+        assert person.name == 'foo'
+
+    def test_single_resource(self):
+        """Tests :http:method:`put` requests for a single resource with a
+        preprocessor function.
+
+        """
+        person = self.Person(id=1, name='foo')
+        self.session.add(person)
+        self.session.commit()
+
+        def set_name(data=None, **kw):
+            """Sets the name attribute of the incoming data object, regardless
+            of the value requested by the client.
+
+            """
+            if data is not None:
+                data['name'] = 'bar'
+
+        preprocessors = dict(PUT=[set_name])
+        self.manager.create_api(self.Person, methods=['PUT'],
+                                preprocessors=preprocessors)
+        data = dict(data=dict(type='person', id=1, name='baz'))
+        response = self.app.put('/api/person/1', data=dumps(data))
+        assert response.status_code == 204
+        assert person.name == 'bar'
+
+    @skip('JSON API does not allow PUT requests on a collection of resources'
+          ' (because it requires specifying a type an ID in all request'
+          ' documents).')
+    def test_collection(self):
+        """Tests :http:method:`put` requests for a collection of resources with
+        a preprocessor function.
+
+        """
+        person1 = self.Person(id=1, name='foo')
+        person2 = self.Person(id=2, name='bar')
+        self.session.add(person)
+        self.session.commit()
+
+        def set_name(data=None, **kw):
+            """Sets the name attribute of the incoming data object, regardless
+            of the value requested by the client.
+
+            """
+            if data is not None:
+                data['name'] = 'xyzzy'
+
+        preprocessors = dict(PUT_COLLECTION=[set_name])
+        self.manager.create_api(self.Person, methods=['PUT'],
+                                allow_patch_many=True,
+                                preprocessors=preprocessors)
+        data = dict(data=dict(type='person', name='baz'))
+        response = self.app.put('/api/person', data=dumps(data))
+        assert response.status_code == 200
+        document = loads(response.data)
+        assert document['meta']['total'] == 2
+        assert all(person.name == 'xyzzy' for person in (person1, person2))
+
+
 class TestAssociationProxy(ManagerTestBase):
     """Tests for creating an object with a relationship using an association
     proxy.
@@ -989,3 +1116,43 @@ class TestAssociationProxy(ManagerTestBase):
     #     assert 200 == response.status_code
     #     assert vim_relation not in computer['programs']
     #     assert emacs_relation in computer['programs']
+
+
+@skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
+class TestFlaskSqlalchemy(FlaskTestBase):
+    """Tests for updating resources defined as Flask-SQLAlchemy models instead
+    of pure SQLAlchemy models.
+
+    """
+
+    def setUp(self):
+        """Creates the Flask-SQLAlchemy database and models."""
+        super(TestFlaskSqlalchemy, self).setUp()
+        self.db = SQLAlchemy(self.flaskapp)
+        self.session = self.db.session
+
+        class Person(self.db.Model):
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            name = self.db.Column(self.db.Unicode)
+
+        self.Person = Person
+        self.db.create_all()
+        self.manager = APIManager(self.flaskapp, flask_sqlalchemy_db=self.db)
+        self.manager.create_api(self.Person, methods=['PUT'])
+
+    def tearDown(self):
+        """Drops all tables and unregisters Flask-SQLAlchemy session signals.
+
+        """
+        self.db.drop_all()
+        unregister_fsa_session_signals()
+
+    def test_create(self):
+        """Tests for creating a resource."""
+        person = self.Person(id=1, name='foo')
+        self.session.add(person)
+        self.session.commit()
+        data = dict(data=dict(type='person', id=1, name='bar'))
+        response = self.app.put('/api/person/1', data=dumps(data))
+        assert response.status_code == 204
+        assert person.name == 'bar'

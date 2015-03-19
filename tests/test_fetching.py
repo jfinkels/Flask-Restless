@@ -38,6 +38,7 @@ from sqlalchemy.orm import relationship
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
 
+from .helpers import DatabaseTestBase
 from .helpers import FlaskTestBase
 from .helpers import loads
 from .helpers import MSIE8_UA
@@ -374,6 +375,195 @@ class TestFetching(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         assert person['foo'] == 'bar'
+
+
+class TestProcessors(DatabaseTestBase):
+    """Tests for pre- and postprocessors."""
+
+    def setUp(self):
+        """Creates the database, the :class:`~flask.Flask` object, the
+        :class:`~flask_restless.manager.APIManager` for that application, and
+        creates the ReSTful API endpoints for the :class:`TestSupport.Person`
+        and :class:`TestSupport.Article` models.
+
+        """
+        super(TestProcessors, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+
+        self.Person = Person
+        self.Base.metadata.create_all()
+        self.manager.create_api(Person)
+
+    def test_single_resource_processing_exception(self):
+        """Tests for a preprocessor that raises a :exc:`ProcessingException`
+        when fetching a single resource.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        def forbidden(**kw):
+            raise ProcessingException(code=403, description='forbidden')
+
+        preprocessors = dict(GET_RESOURCE=[forbidden])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        response = self.app.get('/api/person/1')
+        assert response.status_code == 403
+        document = loads(response.data)
+        errors = document['errors']
+        assert len(errors) == 1
+        error = errors[0]
+        assert 'forbidden' == error['detail']
+
+    def test_collection_processing_exception(self):
+        """Tests for a preprocessor that raises a :exc:`ProcessingException`
+        when fetching a collection of resources.
+
+        """
+
+        def forbidden(**kw):
+            raise ProcessingException(code=403, description='forbidden')
+
+        preprocessors = dict(GET_COLLECTION=[forbidden])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        response = self.app.get('/api/person')
+        assert response.status_code == 403
+        document = loads(response.data)
+        errors = document['errors']
+        assert len(errors) == 1
+        error = errors[0]
+        assert 'forbidden' == error['detail']
+
+    def test_change_id(self):
+        """Tests that a return value from a preprocessor overrides the ID of
+        the resource to fetch as given in the request URL.
+
+        """
+        person = self.Person(id=1, name='foo')
+        self.session.add(person)
+        self.session.commit()
+
+        def increment_id(instance_id=None, **kw):
+            if instance_id is None:
+                raise ProcessingException(code=400)
+            return int(instance_id) + 1
+
+        preprocessors = dict(GET_RESOURCE=[increment_id])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        response = self.app.get('/api/person/0')
+        assert response.status_code == 200
+        document = loads(response.data)
+        person = document['data']
+        assert person['id'] == '1'
+        assert person['name'] == 'foo'
+
+    def test_last_preprocessor_changes_id(self):
+        """Tests that a return value from the last preprocessor in the list
+        overrides the ID of the resource to fetch as given in the request URL.
+
+        """
+        person = self.Person(id=2, name='foo')
+        self.session.add(person)
+        self.session.commit()
+
+        def increment_id(instance_id=None, **kw):
+            if instance_id is None:
+                raise ProcessingException(code=400)
+            return int(instance_id) + 1
+
+        preprocessors = dict(GET_RESOURCE=[increment_id, increment_id])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        response = self.app.get('/api/person/0')
+        assert response.status_code == 200
+        document = loads(response.data)
+        person = document['data']
+        assert person['id'] == '2'
+        assert person['name'] == 'foo'
+
+    def test_no_client_filters(self):
+        """Tests that a preprocessor can modify the filter objects in a
+        request, even if the client did not specify any ``filter[objects]``
+        query parameter.
+
+        """
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+
+        def restrict_ids(filters=None, **kw):
+            """Adds an additional filter to any existing filters that restricts
+            which resources appear in the response.
+
+            """
+            if filters is None:
+                raise ProcessingException(code=400)
+            filt = dict(name='id', op='lt', val=2)
+            filters.append(filt)
+
+        preprocessors = dict(GET_COLLECTION=[restrict_ids])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        response = self.app.get('/api/person')
+        assert response.status_code == 200
+        document = loads(response.data)
+        people = response['data']
+        assert ['1'] == sorted(person['id'] for person in people)
+
+    def test_add_filters(self):
+        """Tests that a preprocessor can modify the filter objects provided by
+        the client in the ``filter[objects]`` query parameter.
+
+        """
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        person3 = self.Person(id=3)
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+
+        def restrict_ids(filters=None, **kw):
+            """Adds an additional filter to any existing filters that restricts
+            which resources appear in the response.
+
+            """
+            if filters is None:
+                raise ProcessingException(code=400)
+            filt = dict(name='id', op='lt', val=2)
+            filters.append(filt)
+
+        preprocessors = dict(GET_COLLECTION=[restrict_filters])
+        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        filters = [dict(name='id', op='in', val=[1, 3])]
+        query = {'filter[objects]': filters}
+        response = self.app.get('/api/person', query_string=query)
+        assert response.status_code == 200
+        document = loads(response.data)
+        people = response['data']
+        assert ['1'] == sorted(person['id'] for person in people)
+
+    def test_collection_postprocessor(self):
+        """Tests that a postprocessor for a collection endpoint has access to
+        the filters specified by the client.
+
+        """
+        client_filters = [dict(name='id', op='eq', val=1)]
+
+        def check_filters(filters=None, **kw):
+            """Assert that the filters that Flask-Restless understood from the
+            request are the same filter objects provided by the client.
+
+            """
+            assert filters == client_filters
+
+        postprocessors = dict(GET_COLLECTION=[check_filters])
+        self.manager.create_api(self.Person, postprocessors=postprocessors)
+        query_string = {'filter[objects]': client_filters}
+        response = self.app.search('/api/person', query_string=query_string)
+        assert response.status_code == 200
 
 
 class TestDynamicRelationships(ManagerTestBase):

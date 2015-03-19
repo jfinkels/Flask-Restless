@@ -528,75 +528,18 @@ class TestFSA(FlaskTestBase):
 
         """
         super(TestFSA, self).setUp()
-
-        # initialize SQLAlchemy and Flask-Restless
         self.db = SQLAlchemy(self.flaskapp)
 
-        # for the sake of brevity...
-        db = self.db
-
-        # declare the models
-        class Computer(db.Model):
-            id = db.Column(db.Integer, primary_key=True)
-            name = db.Column(db.Unicode, unique=True)
-            vendor = db.Column(db.Unicode)
-            buy_date = db.Column(db.DateTime)
-            owner_id = db.Column(db.Integer, db.ForeignKey('person.id'))
-            owner = db.relationship('Person',
-                                    backref=db.backref('computers',
-                                                       lazy='dynamic'))
-
-        class Person(db.Model):
-            id = db.Column(db.Integer, primary_key=True)
-            name = db.Column(db.Unicode, unique=True)
-            age = db.Column(db.Float)
-            other = db.Column(db.Float)
-            birth_date = db.Column(db.Date)
+        class Person(self.db.Model):
+            id = self.db.Column(self.db.Integer, primary_key=True)
 
         self.Person = Person
-        self.Computer = Computer
-
-        # create all the tables required for the models
         self.db.create_all()
 
     def tearDown(self):
         """Drops all tables from the temporary database."""
         self.db.drop_all()
         unregister_fsa_session_signals()
-
-    def test_flask_sqlalchemy(self):
-        """Tests that :class:`flask.ext.restless.APIManager` correctly exposes
-        models defined using Flask-SQLAlchemy.
-
-        """
-        manager = APIManager(self.flaskapp, flask_sqlalchemy_db=self.db)
-
-        # create three different APIs for the same model
-        manager.create_api(self.Person, methods=['GET', 'POST'])
-        manager.create_api(self.Person, methods=['PATCH'], url_prefix='/api2')
-        manager.create_api(self.Person, methods=['GET'],
-                           url_prefix='/readonly')
-
-        # test that specified endpoints exist
-        response = self.app.post('/api/person', data=dumps(dict(name='foo')))
-        assert response.status_code == 201
-        assert loads(response.data)['id'] == 1
-        response = self.app.get('/api/person')
-        assert response.status_code == 200
-        assert len(loads(response.data)['objects']) == 1
-        assert loads(response.data)['objects'][0]['id'] == 1
-        response = self.app.patch('/api2/person/1',
-                                  data=dumps(dict(name='bar')))
-        assert response.status_code == 200
-        assert loads(response.data)['id'] == 1
-        assert loads(response.data)['name'] == 'bar'
-
-        # test that the model is the same as before
-        response = self.app.get('/readonly/person')
-        assert response.status_code == 200
-        assert len(loads(response.data)['objects']) == 1
-        assert loads(response.data)['objects'][0]['id'] == 1
-        assert loads(response.data)['objects'][0]['name'] == 'bar'
 
     def test_init_app(self):
         manager = APIManager()
