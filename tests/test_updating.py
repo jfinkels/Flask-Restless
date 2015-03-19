@@ -39,13 +39,19 @@ from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.collections import attribute_mapped_collection as amc
 
+from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
+from flask.ext.restless import ProcessingException
 
 from .helpers import DatabaseTestBase
 from .helpers import dumps
+from .helpers import FlaskTestBase
+from .helpers import loads
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
 from .helpers import ManagerTestBase
+from .helpers import skip
+from .helpers import skip_unless
 from .helpers import unregister_fsa_session_signals
 
 
@@ -913,7 +919,7 @@ class TestProcessors(DatabaseTestBase):
         """
         person1 = self.Person(id=1, name='foo')
         person2 = self.Person(id=2, name='bar')
-        self.session.add(person)
+        self.session.add_all([person1, person2])
         self.session.commit()
 
         def set_name(data=None, **kw):

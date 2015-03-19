@@ -855,7 +855,7 @@ class TestFetchingData(ManagerTestBase):
 
         """
         person = self.Person(id=1)
-        self.session.add()
+        self.session.add(person)
         self.session.commit()
         response = self.app.get('/api/article/1/author')
         assert response.status_code == 200

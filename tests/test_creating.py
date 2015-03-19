@@ -41,14 +41,18 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 
+from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
+from flask.ext.restless.helpers import to_dict
 
 from .helpers import dumps
 from .helpers import DatabaseTestBase
 from .helpers import loads
+from .helpers import FlaskTestBase
 from .helpers import ManagerTestBase
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
+from .helpers import skip_unless
 from .helpers import unregister_fsa_session_signals
 
 
@@ -404,7 +408,7 @@ class TestCreating(ManagerTestBase):
         assert response.status_code == 201
         document = loads(response.data)
         tag = document['data']
-        assert tag['id'] = u'foo'
+        assert tag['id'] == u'foo'
 
     # TODO Not supported right now.
     #
@@ -471,7 +475,7 @@ class TestCreating(ManagerTestBase):
         assert response.status_code == 201
         document = loads(response.data)
         person = document['data']
-        assert data['foo'] == 'bar'
+        assert person['foo'] == 'bar'
 
 
 class TestProcessors(DatabaseTestBase):

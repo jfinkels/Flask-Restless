@@ -37,6 +37,8 @@ from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
+from flask.ext.restless import ProcessingException
+from flask.ext.restless.helpers import to_dict
 
 from .helpers import DatabaseTestBase
 from .helpers import FlaskTestBase
@@ -511,7 +513,7 @@ class TestProcessors(DatabaseTestBase):
         response = self.app.get('/api/person')
         assert response.status_code == 200
         document = loads(response.data)
-        people = response['data']
+        people = document['data']
         assert ['1'] == sorted(person['id'] for person in people)
 
     def test_add_filters(self):
@@ -535,14 +537,14 @@ class TestProcessors(DatabaseTestBase):
             filt = dict(name='id', op='lt', val=2)
             filters.append(filt)
 
-        preprocessors = dict(GET_COLLECTION=[restrict_filters])
+        preprocessors = dict(GET_COLLECTION=[restrict_ids])
         self.manager.create_api(self.Person, preprocessors=preprocessors)
         filters = [dict(name='id', op='in', val=[1, 3])]
         query = {'filter[objects]': filters}
         response = self.app.get('/api/person', query_string=query)
         assert response.status_code == 200
         document = loads(response.data)
-        people = response['data']
+        people = document['data']
         assert ['1'] == sorted(person['id'] for person in people)
 
     def test_collection_postprocessor(self):

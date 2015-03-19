@@ -12,7 +12,6 @@
 import datetime
 
 from flask import Flask
-from flask import json
 try:
     from flask.ext.sqlalchemy import SQLAlchemy
 except ImportError:
@@ -22,20 +21,20 @@ else:
 from nose.tools import raises
 from sqlalchemy import Column
 from sqlalchemy import Integer
+from sqlalchemy import Unicode
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import url_for
 from flask.ext.restless import IllegalArgumentError
-from flask.ext.restless.helpers import to_dict
 from flask.ext.restless.helpers import get_columns
 
 from .helpers import DatabaseTestBase
+from .helpers import ManagerTestBase
 from .helpers import dumps
 from .helpers import FlaskTestBase
 from .helpers import force_json_contenttype
 from .helpers import loads
 from .helpers import skip_unless
-from .helpers import TestSupport
 from .helpers import unregister_fsa_session_signals
 
 
@@ -512,7 +511,6 @@ class TestAPIManager(ManagerTestBase):
         """
         self.manager.create_api(self.Person, exclude_columns=['id'],
                                 methods=['POST'])
-
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
