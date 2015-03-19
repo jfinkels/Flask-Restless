@@ -14,7 +14,7 @@
 """
 import string
 from urllib.parse import urlparse
-from uuid import uuid1
+import uuid
 
 from sqlalchemy import Column
 from sqlalchemy import DateTime
@@ -23,14 +23,47 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import func
 from sqlalchemy import Integer
 from sqlalchemy import Unicode
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import CHAR
+from sqlalchemy.types import TypeDecorator
 
 from flask.ext.restless import CONTENT_TYPE
 
 from .helpers import dumps
 from .helpers import loads
 from .helpers import ManagerTestBase
-from .helpers import GUID
+
+
+# This code is adapted from
+# http://docs.sqlalchemy.org/en/latest/core/custom_types.html#backend-agnostic-guid-type
+class GUID(TypeDecorator):
+    """Platform-independent GUID type.
+
+    Uses Postgresql's UUID type, otherwise uses CHAR(32), storing as
+    stringified hex values.
+
+    """
+    impl = CHAR
+
+    def load_dialect_impl(self, dialect):
+        descriptor = UUID() if dialect.name == 'postgresql' else CHAR(32)
+        return dialect.type_descriptor(descriptor)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == 'postgresql':
+            return str(value)
+        if not isinstance(value, uuid.UUID):
+            return uuid.UUID(value).hex
+        # If we get to this point, we assume `value` is a UUID object.
+        return value.hex
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        return uuid.UUID(value)
 
 
 class TestDocumentStructure(ManagerTestBase):
@@ -1343,7 +1376,7 @@ class TestCreatingResources(ManagerTestBase):
         .. _Client-Generated IDs: http://jsonapi.org/format/#crud-creating-client-ids
 
         """
-        generated_id = uuid1()
+        generated_id = uuid.uuid1()
         data = dict(data=dict(type='article', id=generated_id))
         response = self.app.post('/api/article', data=dumps(data))
         # Our server always responds with 201 when a client-generated ID is
@@ -1368,7 +1401,7 @@ class TestCreatingResources(ManagerTestBase):
         """
         self.manager.create_api(self.Article, url_prefix='/api2',
                                 methods=['POST'])
-        data = dict(data=dict(type='article', id=uuid1()))
+        data = dict(data=dict(type='article', id=uuid.uuid1()))
         response = self.app.post('/api2/article', data=dumps(data))
         assert response.status_code == 403
         # TODO test for error details (for example, a message specifying that
@@ -1401,7 +1434,7 @@ class TestCreatingResources(ManagerTestBase):
         .. _409 Conflict: http://jsonapi.org/format/#crud-creating-responses-409
 
         """
-        generated_id = uuid1()
+        generated_id = uuid.uuid1()
         self.session.add(self.Article(id=generated_id))
         self.session.commit()
         data = dict(data=dict(type='article', id=generated_id))

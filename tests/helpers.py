@@ -9,20 +9,9 @@
     :license: GNU AGPLv3+ or BSD
 
 """
-import sys
-is_python_version_2 = sys.version_info[0] == 2
-
-if is_python_version_2:
-    import types
-
-    def isclass(obj):
-        return isinstance(obj, (types.TypeType, types.ClassType))
-else:
-    def isclass(obj):
-        return isinstance(obj, type)
-
 import functools
-import uuid
+import sys
+import types
 
 from flask import Flask
 from flask import json
@@ -35,13 +24,10 @@ else:
 from nose import SkipTest
 from sqlalchemy import create_engine
 from sqlalchemy import event
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session as SessionBase
-from sqlalchemy.types import CHAR
-from sqlalchemy.types import TypeDecorator
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
@@ -58,6 +44,20 @@ MSIE8_UA = 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0)'
 #:
 #: From <http://blogs.msdn.com/b/ie/archive/2010/03/23/introducing-ie9-s-user-agent-string.aspx>.
 MSIE9_UA = 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)'
+
+#: Boolean representing whether this code is being executed on Python 2.
+IS_PYTHON2 = (sys.version_info[0] == 2)
+
+#: Tuple of objects representing types.
+CLASS_TYPES = (types.TypeType, types.ClassType) if IS_PYTHON2 else (type, )
+
+
+def isclass(obj):
+    """Returns ``True`` if and only if the specified object is a type (or a
+    class).
+
+    """
+    return isinstance(obj, CLASS_TYPES)
 
 
 def skip_unless(condition, reason=None):
@@ -152,37 +152,6 @@ def force_json_contenttype(test_client):
     # # PATCH methods need to have `application/json-patch+json` content type.
     # test_client.patch = set_content_type(test_client.patch,
     #                                      'application/json-patch+json')
-
-
-# This code adapted from
-# http://docs.sqlalchemy.org/en/latest/core/custom_types.html#backend-agnostic-guid-type
-class GUID(TypeDecorator):
-    """Platform-independent GUID type.
-
-    Uses Postgresql's UUID type, otherwise uses CHAR(32), storing as
-    stringified hex values.
-
-    """
-    impl = CHAR
-
-    def load_dialect_impl(self, dialect):
-        descriptor = UUID() if dialect.name == 'postgresql' else CHAR(32)
-        return dialect.type_descriptor(descriptor)
-
-    def process_bind_param(self, value, dialect):
-        if value is None:
-            return None
-        if dialect.name == 'postgresql':
-            return str(value)
-        if not isinstance(value, uuid.UUID):
-            return uuid.UUID(value).hex
-        # If we get to this point, we assume `value` is a UUID object.
-        return value.hex
-
-    def process_result_value(self, value, dialect):
-        if value is None:
-            return None
-        return uuid.UUID(value)
 
 
 class FlaskTestBase(object):
