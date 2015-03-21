@@ -379,6 +379,260 @@ class TestFetching(ManagerTestBase):
         assert person['foo'] == 'bar'
 
 
+class TestServerSparseFieldsets(ManagerTestBase):
+    """Tests for specifying default sparse fieldsets on the server."""
+
+    def setUp(self):
+        super(TestServerSparseFieldsets, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+            age = Column(Integer)
+
+        class Article(self.Base):
+            __tablename__ = 'article'
+            id = Column(Integer, primary_key=True)
+            title = Column(Unicode)
+            author_id = Column(Integer, ForeignKey('person.id'))
+            author = relationship(Person, backref=backref('articles'))
+            comments = relationship('Comment')
+
+            def first_comment(self):
+                return min(self.comments, key=lambda c: c.id)
+
+        class Comment(self.Base):
+            __tablename__ = 'comment'
+            id = Column(Integer, primary_key=True)
+            article_id = Column(Integer, ForeignKey('article.id'))
+            article = relationship(Article)
+
+        class Photo(self.Base):
+            __tablename__ = 'photo'
+            id = Column(Integer, primary_key=True)
+            title = Column(Unicode)
+
+            def website(self):
+                return 'example.com'
+
+            @property
+            def year(self):
+                return 2015
+
+        self.Article = Article
+        self.Person = Person
+        self.Photo = Photo
+        self.Base.metadata.create_all()
+
+    def test_only_column(self):
+        """Tests for specifying that responses should only include certain
+        column fields.
+
+        """
+        person = self.Person(id=1, name='foo')
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, only=['name'])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert ['id', 'links', 'name', 'type'] == sorted(person)
+        assert ['self'] == sorted(person['links'])
+
+    def test_only_relationship(self):
+        """Tests for specifying that response should only include certain
+        relationships.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, only=['articles'])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert ['id', 'links', 'type'] == sorted(person)
+        assert ['articles', 'self'] == sorted(person['links'])
+
+    # # TODO This doesn't exactly make sense anymore; each type of included
+    # # resource should really determine its own sparse fieldsets.
+    # def test_only_on_included(self):
+    #     """Tests for specifying that response should only include certain
+    #     attributes of related models.
+
+    #     """
+    #     person = self.Person(id=1)
+    #     article = self.Article(title='foo')
+    #     article.author = person
+    #     self.session.add_all([person, article])
+    #     self.session.commit()
+    #     only = ['articles', 'articles.title']
+    #     self.manager.create_api(self.Person, only=only)
+    #     response = self.app.get('/api/person/1?include=articles')
+    #     document = loads(response.data)
+    #     person = document['data']
+    #     assert person['id'] == '1'
+    #     assert person['type'] == 'person'
+    #     assert 'name' not in person
+    #     articles = person['links']['articles']['linkage']
+    #     included = document['included']
+    #     expected_ids = sorted(article['id'] for article in articles)
+    #     actual_ids = sorted(article['id'] for article in included)
+    #     assert expected_ids == actual_ids
+    #     assert all('title' not in article for article in included)
+    #     assert all('comments' in article['links'] for article in included)
+
+    def test_only_as_objects(self):
+        """Test for specifying included columns as SQLAlchemy column objects
+        instead of strings.
+
+        """
+        person = self.Person(id=1, name='foo')
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, only=[self.Person.name])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert ['id', 'links', 'name', 'type'] == sorted(person)
+        assert ['self'] == sorted(person['links'])
+
+    def test_only_none(self):
+        """Tests that providing an empty list as the list of fields to include
+        in responses causes responses to have only the ``id`` and ``type``
+        elements.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, only=[])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert ['id', 'links', 'type'] == sorted(person)
+        assert ['self'] == sorted(person['links'])
+
+    def test_additional_attributes(self):
+        """Tests that additional attributes other than SQLAlchemy columns can
+        be included in responses by default.
+
+        """
+        self.Person.foo = 'bar'
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, additional_attributes=['foo'])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert person['foo'] == 'bar'
+
+    def test_additional_attributes_callable(self):
+        """Tests that callable attributes can be included using the
+        ``additional_attributes`` keyword argument.
+
+        """
+        photo = self.Photo(id=1)
+        self.session.add(photo)
+        self.session.commit()
+        self.manager.create_api(self.Photo, additional_attributes=['website'])
+        response = self.app.get('/api/photo/1')
+        document = loads(response.data)
+        photo = document['data']
+        assert photo['website'] == 'example.com'
+
+    def test_additional_attributes_property(self):
+        """Tests that class properties can be included using the
+        ``additional_attributes`` keyword argument.
+
+        """
+        photo = self.Photo(id=1)
+        self.session.add(photo)
+        self.session.commit()
+        self.manager.create_api(self.Photo, additional_attributes=['year'])
+        response = self.app.get('/api/photo/1')
+        document = loads(response.data)
+        photo = document['data']
+        assert photo['year'] == 2015
+
+    def test_additional_attributes_object(self):
+        """Tests that an additional attribute is serialized if it is an
+        instance of a SQLAlchemy model.
+
+        Technically, a resource's attribute MAY contain any valid JSON object,
+        so this is allowed by the `JSON API specification`_.
+
+        .. _JSON API specification: http://jsonapi.org/format/#document-structure-resource-object-attributes
+
+        """
+        article = self.Article(id=1)
+        comment1 = self.Comment(id=1)
+        comment2 = self.Comment(id=2)
+        article.comments = [comment1, comment2]
+        self.session.add_all([article, comment1, comment2])
+        self.session.commit()
+        self.manager.create_api(self.Article,
+                                additional_attributes=['first_comment'])
+        # HACK will probably need to do this...
+        # self.manager.create_api(self.Comment)
+        response = self.app.get('/api/article/1')
+        document = loads(response.data)
+        article = document['data']
+        first_comment = article['first_comment']
+        assert first_comment['id'] == '1'
+        assert first_comment['type'] == 'comment'
+
+    def test_exclude(self):
+        """Test for excluding columns from a resource's representation."""
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, exclude=['name'])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert 'name' not in person
+
+    # # TODO This doesn't exactly make sense anymore; each type of included
+    # # resource should really determine its own sparse fieldsets.
+    # def test_exclude_on_included(self):
+    #     """Tests for specifying that response should exclude certain
+    #     attributes of related models.
+    #
+    #     """
+    #     person = self.Person(id=1)
+    #     article = self.Article(title='foo')
+    #     article.author = person
+    #     self.session.add_all([person, article])
+    #     self.session.commit()
+    #     self.manager.create_api(self.Person, exclude=['articles.title'])
+    #     response = self.app.get('/api/person/1?include=articles')
+    #     document = loads(response.data)
+    #     person = document['data']
+    #     articles = person['links']['articles']['linkage']
+    #     included = document['included']
+    #     expected_ids = sorted(article['id'] for article in articles)
+    #     actual_ids = sorted(article['id'] for article in included)
+    #     assert expected_ids == actual_ids
+    #     assert all('title' not in article for article in included)
+
+    def test_exclude_as_objects(self):
+        """Test for specifying excluded columns as SQLAlchemy column
+        attributes.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+        self.manager.create_api(self.Person, exclude=[self.Person.name])
+        response = self.app.get('/api/person/1')
+        document = loads(response.data)
+        person = document['data']
+        assert 'name' not in person
+
+
 class TestProcessors(DatabaseTestBase):
     """Tests for pre- and postprocessors."""
 
