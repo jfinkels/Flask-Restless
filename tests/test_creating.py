@@ -213,7 +213,6 @@ class TestCreating(ManagerTestBase):
         data = dict(data=dict(type='person'))
         response = self.app.post('/api/person', data=dumps(data),
                                  headers=headers, content_type=content_type)
-        print(response.data)
         assert response.status_code == 201
 
     def test_no_data(self):
@@ -466,19 +465,20 @@ class TestCreating(ManagerTestBase):
             instance = self.Person(**data)
             return instance
 
+        # POST will deserialize once and serialize once
         self.manager.create_api(self.Person, methods=['POST'],
+                                url_prefix='/api2',
                                 serializer=serializer,
                                 deserializer=deserializer)
-        # POST will deserialize once and serialize once
-        data = dict(data=dict(type='person', id=1, foo='bar'))
-        response = self.app.post('/api/person', data=dumps(data))
+        data = dict(data=dict(type='person', foo='bar'))
+        response = self.app.post('/api2/person', data=dumps(data))
         assert response.status_code == 201
         document = loads(response.data)
         person = document['data']
         assert person['foo'] == 'bar'
 
 
-class TestProcessors(DatabaseTestBase):
+class TestProcessors(ManagerTestBase):
     """Tests for pre- and postprocessors."""
 
     def setUp(self):
@@ -491,7 +491,6 @@ class TestProcessors(DatabaseTestBase):
 
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Person)
 
     def test_preprocessor(self):
         """Tests :http:method:`post` requests with a preprocessor function."""
@@ -502,7 +501,7 @@ class TestProcessors(DatabaseTestBase):
 
             """
             if data is not None:
-                data['name'] = 'bar'
+                data['data']['name'] = 'bar'
 
         preprocessors = dict(POST=[set_name])
         self.manager.create_api(self.Person, methods=['POST'],

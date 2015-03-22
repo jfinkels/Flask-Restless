@@ -421,6 +421,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
                 return 2015
 
         self.Article = Article
+        self.Comment = Comment
         self.Person = Person
         self.Photo = Photo
         self.Base.metadata.create_all()
@@ -437,6 +438,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
         response = self.app.get('/api/person/1')
         document = loads(response.data)
         person = document['data']
+        print(person)
         assert ['id', 'links', 'name', 'type'] == sorted(person)
         assert ['self'] == sorted(person['links'])
 
@@ -575,8 +577,10 @@ class TestServerSparseFieldsets(ManagerTestBase):
         self.session.commit()
         self.manager.create_api(self.Article,
                                 additional_attributes=['first_comment'])
-        # HACK will probably need to do this...
-        # self.manager.create_api(self.Comment)
+        # HACK Need to create APIs for these other models because otherwise
+        # we're not able to create the link URLs to them.
+        self.manager.create_api(self.Comment)
+        self.manager.create_api(self.Person)
         response = self.app.get('/api/article/1')
         document = loads(response.data)
         article = document['data']

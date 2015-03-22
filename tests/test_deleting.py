@@ -253,7 +253,7 @@ class TestDeleting(ManagerTestBase):
     #     # assert len(loads(response.data)['objects']) == 0
 
 
-class TestProcessors(DatabaseTestBase):
+class TestProcessors(ManagerTestBase):
     """Tests for pre- and postprocessors."""
 
     def setUp(self):
@@ -266,7 +266,6 @@ class TestProcessors(DatabaseTestBase):
 
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Person)
 
     def test_change_id(self):
         """Tests that a return value from a preprocessor overrides the ID of
@@ -282,7 +281,7 @@ class TestProcessors(DatabaseTestBase):
                 raise ProcessingException(code=400)
             return int(instance_id) + 1
 
-        preprocessors = dict(DELETE=[increment_id])
+        preprocessors = dict(DELETE_RESOURCE=[increment_id])
         self.manager.create_api(self.Person, methods=['DELETE'],
                                 preprocessors=preprocessors)
         response = self.app.delete('/api/person/0')
@@ -301,8 +300,9 @@ class TestProcessors(DatabaseTestBase):
         def forbidden(**kw):
             raise ProcessingException(code=403, description='forbidden')
 
-        preprocessors = dict(DELETE=[forbidden])
-        self.manager.create_api(self.Person, preprocessors=preprocessors)
+        preprocessors = dict(DELETE_RESOURCE=[forbidden])
+        self.manager.create_api(self.Person, methods=['DELETE'],
+                                preprocessors=preprocessors)
         response = self.app.delete('/api/person/1')
         assert response.status_code == 403
         document = loads(response.data)
@@ -330,7 +330,7 @@ class TestProcessors(DatabaseTestBase):
             filt = dict(name='id', op='lt', val=2)
             filters.append(filt)
 
-        preprocessors = dict(DELETE=[restrict_ids])
+        preprocessors = dict(DELETE_COLLECTION=[restrict_ids])
         self.manager.create_api(self.Person, methods=['DELETE'],
                                 allow_delete_many=True,
                                 preprocessors=preprocessors)

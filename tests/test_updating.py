@@ -175,7 +175,7 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        data = dict(data=dict(type='person', id=1))
+        data = dict(data=dict(type='person', id='1'))
         response = self.app.put('/api/person/1', data=dumps(data),
                                 content_type=None)
         assert response.status_code == 415
@@ -189,7 +189,7 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        data = dict(data=dict(type='person', id=1))
+        data = dict(data=dict(type='person', id='1'))
         bad_content_types = ('application/json', 'application/javascript')
         for content_type in bad_content_types:
             response = self.app.put('/api/person/1', data=dumps(data),
@@ -331,7 +331,7 @@ class TestUpdating(ManagerTestBase):
         self.session.commit()
         self.manager.create_api(self.Person, methods=['PUT'],
                                 collection_name='people')
-        data = dict(data=dict(type='people', id=1, name='foo'))
+        data = dict(data=dict(type='people', id='1', name='foo'))
         response = self.app.put('/api/people/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'foo'
@@ -343,12 +343,12 @@ class TestUpdating(ManagerTestBase):
         self.session.commit()
         self.manager.create_api(self.Person, methods=['PUT'],
                                 url_prefix='/api2')
-        data = dict(data=dict(type='people', name='foo'))
-        response = self.app.put('/api/people/1', data=dumps(data))
+        data = dict(data=dict(type='person', id='1', name='foo'))
+        response = self.app.put('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'foo'
-        data = dict(data=dict(type='people', name='bar'))
-        response = self.app.put('/api2/people/1', data=dumps(data))
+        data = dict(data=dict(type='person', id='1', name='bar'))
+        response = self.app.put('/api2/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'bar'
 
@@ -823,7 +823,7 @@ class TestUpdating(ManagerTestBase):
     #     assert resp.status_code == 404
 
 
-class TestProcessors(DatabaseTestBase):
+class TestProcessors(ManagerTestBase):
     """Tests for pre- and postprocessors."""
 
     def setUp(self):
@@ -832,10 +832,10 @@ class TestProcessors(DatabaseTestBase):
         class Person(self.Base):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
 
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Person)
 
     def test_change_id(self):
         """Tests that a return value from a preprocessor overrides the ID of
@@ -849,9 +849,9 @@ class TestProcessors(DatabaseTestBase):
         def increment_id(instance_id=None, **kw):
             if instance_id is None:
                 raise ProcessingException(code=400)
-            return int(instance_id) + 1
+            return str(int(instance_id) + 1)
 
-        preprocessors = dict(PUT=[increment_id])
+        preprocessors = dict(PUT_RESOURCE=[increment_id])
         self.manager.create_api(self.Person, methods=['PUT'],
                                 preprocessors=preprocessors)
         data = dict(data=dict(type='person', id='1', name='foo'))
@@ -871,7 +871,7 @@ class TestProcessors(DatabaseTestBase):
         def forbidden(**kw):
             raise ProcessingException(code=403, description='forbidden')
 
-        preprocessors = dict(PUT=[forbidden])
+        preprocessors = dict(PUT_RESOURCE=[forbidden])
         self.manager.create_api(self.Person, methods=['PUT'],
                                 preprocessors=preprocessors)
         data = dict(data=dict(type='person', id='1', name='bar'))
@@ -899,12 +899,12 @@ class TestProcessors(DatabaseTestBase):
 
             """
             if data is not None:
-                data['name'] = 'bar'
+                data['data']['name'] = 'bar'
 
-        preprocessors = dict(PUT=[set_name])
+        preprocessors = dict(PUT_RESOURCE=[set_name])
         self.manager.create_api(self.Person, methods=['PUT'],
                                 preprocessors=preprocessors)
-        data = dict(data=dict(type='person', id=1, name='baz'))
+        data = dict(data=dict(type='person', id='1', name='baz'))
         response = self.app.put('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'bar'
@@ -928,7 +928,7 @@ class TestProcessors(DatabaseTestBase):
 
             """
             if data is not None:
-                data['name'] = 'xyzzy'
+                data['data']['name'] = 'xyzzy'
 
         preprocessors = dict(PUT_COLLECTION=[set_name])
         self.manager.create_api(self.Person, methods=['PUT'],
@@ -1063,7 +1063,7 @@ class TestAssociationProxy(ManagerTestBase):
         article.tags = [tag1, tag2]
         self.session.add_all([article, tag1, tag2])
         self.session.commit()
-        data = dict(data=dict(type='article', id=1, tag_names=['foo', 'bar']))
+        data = dict(data=dict(type='article', id='1', tag_names=['foo', 'bar']))
         response = self.app.put('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert ['foo', 'bar'] == article.tag_names
@@ -1134,7 +1134,12 @@ class TestFlaskSqlalchemy(FlaskTestBase):
     def setUp(self):
         """Creates the Flask-SQLAlchemy database and models."""
         super(TestFlaskSqlalchemy, self).setUp()
-        self.db = SQLAlchemy(self.flaskapp)
+        # HACK During testing, we don't want the session to expire, so that we
+        # can access attributes of model instances *after* a request has been
+        # made (that is, after Flask-Restless does its work and commits the
+        # session).
+        session_options = dict(expire_on_commit=False)
+        self.db = SQLAlchemy(self.flaskapp, session_options=session_options)
         self.session = self.db.session
 
         class Person(self.db.Model):
@@ -1158,7 +1163,7 @@ class TestFlaskSqlalchemy(FlaskTestBase):
         person = self.Person(id=1, name='foo')
         self.session.add(person)
         self.session.commit()
-        data = dict(data=dict(type='person', id=1, name='bar'))
+        data = dict(data=dict(type='person', id='1', name='bar'))
         response = self.app.put('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'bar'
