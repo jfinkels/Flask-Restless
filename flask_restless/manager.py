@@ -392,11 +392,10 @@ class APIManager(object):
     def create_api_blueprint(self, model, app=None, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
                              allow_patch_many=False, allow_delete_many=False,
-                             allow_functions=False, exclude_columns=None,
-                             include_columns=None, include_methods=None,
+                             allow_functions=False, only=None, exclude=None,
+                             additional_attributes=None,
                              validation_exceptions=None, page_size=10,
-                             max_page_size=100,
-                             post_form_preprocessor=None, preprocessors=None,
+                             max_page_size=100, preprocessors=None,
                              postprocessors=None, primary_key=None,
                              serializer=None, deserializer=None,
                              includes=None, allow_to_many_replacement=False,
@@ -610,7 +609,7 @@ class APIManager(object):
            Force the model name in the URL to lowercase.
 
         """
-        if exclude_columns is not None and include_columns is not None:
+        if only is not None and exclude is not None:
             msg = ('Cannot simultaneously specify both include columns and'
                    ' exclude columns.')
             raise IllegalArgumentError(msg)
@@ -633,13 +632,13 @@ class APIManager(object):
         # if allow_delete_many and 'DELETE' in methods:
         #     possibly_empty_instance_methods |= frozenset(('DELETE', ))
 
-        # Check that primary_key is included for no_instance_methods
-        if no_instance_methods:
-            pk_name = primary_key or primary_key_name(model)
-            if (include_columns and pk_name not in include_columns or
-                exclude_columns and pk_name in exclude_columns):
-                msg = ('The primary key must be included for APIs with POST.')
-                raise IllegalArgumentError(msg)
+        # # Check that primary_key is included for no_instance_methods
+        # if no_instance_methods:
+        #     pk_name = primary_key or primary_key_name(model)
+        #     if (include_columns and pk_name not in include_columns or
+        #         exclude_columns and pk_name in exclude_columns):
+        #         msg = ('The primary key must be included for APIs with POST.')
+        #         raise IllegalArgumentError(msg)
 
         # the base URL of the endpoints on which requests will be made
         collection_endpoint = '/{0}'.format(collection_name)
@@ -664,9 +663,9 @@ class APIManager(object):
                                validation_exceptions=validation_exceptions,
                                allow_to_many_replacement=allow_to_many_replacement,
                                # Keyword arguments for API.__init__()
-                               exclude_columns=exclude_columns,
-                               include_columns=include_columns,
-                               include_methods=include_methods,
+                               only=only,
+                               exclude=exclude,
+                               additional_attributes=additional_attributes,
                                page_size=page_size,
                                max_page_size=max_page_size,
                                serializer=serializer,
