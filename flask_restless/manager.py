@@ -23,10 +23,11 @@ import flask
 from flask import request
 from flask import Blueprint
 
-from .helpers import primary_key_name
 from .helpers import collection_name
 from .helpers import model_for
 from .helpers import url_for
+from .serialization import DefaultSerializer
+from .serialization import DefaultDeserializer
 from .views import API
 from .views import FunctionAPI
 from .views import RelationshipAPI
@@ -609,9 +610,16 @@ class APIManager(object):
            Force the model name in the URL to lowercase.
 
         """
+        # Perform some sanity checks on the provided keyword arguments.
         if only is not None and exclude is not None:
             msg = ('Cannot simultaneously specify both include columns and'
                    ' exclude columns.')
+            raise IllegalArgumentError(msg)
+        if not hasattr(model, 'id'):
+            msg = 'Provided model must have an `id` attribute'
+            raise IllegalArgumentError(msg)
+        if collection_name == '':
+            msg = 'Collection name must be nonempty'
             raise IllegalArgumentError(msg)
         # If no Flask application is specified, use the one (we assume) was
         # specified in the constructor.
@@ -623,23 +631,9 @@ class APIManager(object):
         # convert all method names to upper case
         methods = frozenset((m.upper() for m in methods))
         # sets of methods used for different types of endpoints
-        no_instance_methods = methods & frozenset(('POST', ))
+        #no_instance_methods = methods & frozenset(('POST', ))
         instance_methods = \
             methods & frozenset(('GET', 'PATCH', 'DELETE', 'PUT'))
-        possibly_empty_instance_methods = methods & frozenset(('GET', ))
-        # if allow_patch_many and ('PATCH' in methods or 'PUT' in methods):
-        #     possibly_empty_instance_methods |= frozenset(('PATCH', 'PUT'))
-        # if allow_delete_many and 'DELETE' in methods:
-        #     possibly_empty_instance_methods |= frozenset(('DELETE', ))
-
-        # # Check that primary_key is included for no_instance_methods
-        # if no_instance_methods:
-        #     pk_name = primary_key or primary_key_name(model)
-        #     if (include_columns and pk_name not in include_columns or
-        #         exclude_columns and pk_name in exclude_columns):
-        #         msg = ('The primary key must be included for APIs with POST.')
-        #         raise IllegalArgumentError(msg)
-
         # the base URL of the endpoints on which requests will be made
         collection_endpoint = '/{0}'.format(collection_name)
         # the name of the API, for use in creating the view and the blueprint
@@ -654,6 +648,13 @@ class APIManager(object):
             preprocessors_[key] = value + preprocessors_[key]
         for key, value in restlessinfo.universal_postprocessors.items():
             postprocessors_[key] = value + postprocessors_[key]
+        # Create a default serializer and deserializer if none have been
+        # provided.
+        if serializer is None:
+            serializer = DefaultSerializer(only, exclude,
+                                           additional_attributes)
+        if deserializer is None:
+            deserializer = DefaultDeserializer(restlessinfo.session, model)
         # the view function for the API for this model
         api_view = API.as_view(apiname, restlessinfo.session, model,
                                # Keyword arguments for APIBase.__init__()
@@ -663,9 +664,6 @@ class APIManager(object):
                                validation_exceptions=validation_exceptions,
                                allow_to_many_replacement=allow_to_many_replacement,
                                # Keyword arguments for API.__init__()
-                               only=only,
-                               exclude=exclude,
-                               additional_attributes=additional_attributes,
                                page_size=page_size,
                                max_page_size=max_page_size,
                                serializer=serializer,

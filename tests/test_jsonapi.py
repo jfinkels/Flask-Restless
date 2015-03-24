@@ -887,12 +887,13 @@ class TestFetchingData(ManagerTestBase):
         .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
 
         """
-        person = self.Person(id=1)
-        self.session.add(person)
+        article = self.Article(id=1)
+        self.session.add(article)
         self.session.commit()
         response = self.app.get('/api/article/1/author')
         assert response.status_code == 200
         document = loads(response.data)
+        print(document)
         author = document['data']
         assert author is None
 
@@ -970,6 +971,7 @@ class TestFetchingData(ManagerTestBase):
         self.session.add_all([person, article])
         self.session.commit()
         response = self.app.get('/api/article/1/links/author')
+        assert response.status_code == 200
         document = loads(response.data)
         person = document['data']
         assert person['id'] == '1'
@@ -987,6 +989,7 @@ class TestFetchingData(ManagerTestBase):
         self.session.add(article)
         self.session.commit()
         response = self.app.get('/api/article/1/links/author')
+        assert response.status_code == 200
         document = loads(response.data)
         person = document['data']
         assert person is None
@@ -1167,6 +1170,7 @@ class TestFetchingData(ManagerTestBase):
         response = self.app.get('/api/person?fields[person]=id,name')
         document = loads(response.data)
         people = document['data']
+        print(document)
         assert all(['id', 'name', 'type'] == sorted(p) for p in people)
 
     def test_sparse_fieldsets_multiple_types(self):

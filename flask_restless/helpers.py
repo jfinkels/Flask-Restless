@@ -11,14 +11,9 @@
 """
 import datetime
 import inspect
-try:
-    from urllib.parse import urljoin
-except ImportError:
-    from urlparse import urljoin
-import uuid
 
 from dateutil.parser import parse as parse_datetime
-from flask import request
+from sqlalchemy import Column
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import Interval
@@ -26,14 +21,12 @@ from sqlalchemy import Time
 from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.associationproxy import AssociationProxy
-from sqlalchemy.ext import hybrid
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import ColumnProperty
 from sqlalchemy.orm import class_mapper
 from sqlalchemy.orm import RelationshipProperty as RelProperty
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.attributes import QueryableAttribute
-from sqlalchemy.orm.query import Query
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import ColumnElement
 from sqlalchemy.inspection import inspect as sqlalchemy_inspect
@@ -43,11 +36,6 @@ from werkzeug.urls import url_quote_plus
 #: dynamically computing a list of relations of a SQLAlchemy model.
 RELATION_BLACKLIST = ('query', 'query_class', '_sa_class_manager',
                       '_decl_class_registry')
-
-
-#: Names of columns which should definitely not be considered user columns to
-#: be included in a dictionary representation of a model.
-COLUMN_BLACKLIST = ('_sa_polymorphic_on', )
 
 #: Types which should be considered columns of a model when iterating over all
 #: attributes of a model class.
@@ -294,139 +282,6 @@ def is_mapped_class(cls):
         return False
 
 
-def to_dict(instance, only=None):
-    """Returns a dictionary representing the fields of the specified instance
-    of a SQLAlchemy model.
-
-    The returned dictionary is suitable as an argument to
-    :func:`flask.jsonify`; :class:`datetime.date` and :class:`uuid.UUID`
-    objects are converted to string representations, so no special JSON encoder
-    behavior is required.
-
-    If `only` is a list, only the fields and relationships whose names appear
-    as strings in `only` will appear in the resulting dictionary. The only
-    exception is that the keys ``'id'`` and ``'type'`` will always appear,
-    regardless of whether they appear in `only`.
-
-    Since this function creates absolute URLs to resources linked to the given
-    instance, it must be called within a `Flask request context`_.
-
-    .. _Flask request context: http://flask.pocoo.org/docs/0.10/reqcontext/
-
-    """
-    model = type(instance)
-    try:
-        inspected_instance = sqlalchemy_inspect(model)
-    except NoInspectionAvailable:
-        return instance
-    column_attrs = inspected_instance.column_attrs.keys()
-    descriptors = inspected_instance.all_orm_descriptors.items()
-    # hybrid_columns = [k for k, d in descriptors
-    #                   if d.extension_type == hybrid.HYBRID_PROPERTY
-    #                   and not (deep and k in deep)]
-    hybrid_columns = [k for k, d in descriptors
-                      if d.extension_type == hybrid.HYBRID_PROPERTY]
-    columns = column_attrs + hybrid_columns
-    # Exclude column names that are blacklisted.
-    columns = (c for c in columns
-               if not c.startswith('__') and c not in COLUMN_BLACKLIST)
-    # If `only` is a list, only include those columns that are in the list.
-    if only is not None:
-        columns = (c for c in columns if c in only)
-    # Exclude column names that are foreign keys.
-    foreign_key_columns = foreign_keys(model)
-    columns = (c for c in columns if c not in foreign_key_columns)
-    # Create a dictionary mapping attribute name to attribute value for this
-    # particular instance.
-    result = {column: getattr(instance, column) for column in columns}
-    # Call any functions that appear in the result.
-    result = {k: (v() if callable(v) else v) for k, v in result.items()}
-    # Add the resource type to the result dictionary.
-    result['type'] = collection_name(model)
-    # Add the self link unless it has been explicitly excluded.
-    if only is None or 'self' in only:
-        instance_id = primary_key_value(instance)
-        url = urljoin(request.url_root, url_for(model, instance_id))
-        result['links'] = dict(self=url)
-    # # add any included methods
-    # if include_methods is not None:
-    #     for method in include_methods:
-    #         if '.' not in method:
-    #             value = getattr(instance, method)
-    #             # Allow properties and static attributes in include_methods
-    #             if callable(value):
-    #                 value = value()
-    #             result[method] = value
-
-    # TODO Should the responsibility for serializing date and uuid objects move
-    # outside of this function? I think so.
-    #
-    # Check for objects in the dictionary that may not be serializable by
-    # default. Convert datetime objects to ISO 8601 format, convert UUID
-    # objects to hexadecimal strings, etc.
-    for key, value in result.items():
-        if isinstance(value, (datetime.date, datetime.time)):
-            result[key] = value.isoformat()
-        elif isinstance(value, uuid.UUID):
-            result[key] = str(value)
-        elif key not in column_attrs and is_mapped_class(type(value)):
-            result[key] = to_dict(value)
-    # If the primary key is not named "id", we'll duplicate the primary key
-    # under the "id" key.
-    pk_name = primary_key_name(model)
-    if pk_name != 'id':
-        result['id'] = result[pk_name]
-    # TODO Same problem as above.
-    #
-    # In order to comply with the JSON API standard, primary keys must be
-    # returned to the client as strings, so we convert it here.
-    if 'id' in result:
-        result['id'] = str(result['id'])
-    # If there are relations to convert to dictionary form, put them into a
-    # special `links` key as required by JSON API.
-    relations = get_relations(model)
-    # Only consider those relations listed in `only`.
-    if only is not None:
-        relations = [r for r in relations if r in only]
-    if relations:
-        # The links mapping may already exist if a self link was added above.
-        if 'links' not in result:
-            result['links'] = {}
-        for relation in relations:
-            # Create the common elements in the link object: the `self` and
-            # `resource` links.
-            result['links'][relation] = {}
-            link = result['links'][relation]
-            link['self'] = url_for(model, primary_key_value(instance),
-                                   relation, relationship=True)
-            link['related'] = url_for(model, primary_key_value(instance),
-                                      relation)
-            # Get the related value so we can see if it is a to-many
-            # relationship or a to-one relationship.
-            related_value = getattr(instance, relation)
-            # If the related value is list-like, it represents a to-many
-            # relationship.
-            if is_like_list(instance, relation):
-                link['linkage'] = [dict(type=collection_name(get_model(inst)),
-                                     id=str(primary_key_value(inst)))
-                                for inst in related_value]
-                continue
-            # At this point, we know we have a to-one relationship.
-            related_model = get_related_model(model, relation)
-            link['linkage'] = dict(type=collection_name(related_model))
-            # If the related value is None, that means we have an empty to-one
-            # relationship.
-            if related_value is None:
-                link['linkage']['id'] = None
-                continue
-            # If the related value is dynamically loaded, resolve the query to
-            # get the single instance in the to-one relationship.
-            if isinstance(related_value, Query):
-                related_value = related_value.one()
-            link['linkage']['id'] = str(primary_key_value(related_value))
-    return result
-
-
 def evaluate_functions(session, model, functions):
     """Executes each of the SQLAlchemy functions specified in ``functions``, a
     list of dictionaries of the form described below, on the given model and
@@ -658,6 +513,33 @@ def changes_on_update(model):
     """
     return any(column.onupdate is not None
                for column in sqlalchemy_inspect(model).columns)
+
+
+def get_column_name(self, column):
+    """Retrieve a column name from a column attribute of SQLAlchemy model
+    class, or a string.
+
+    Raises `TypeError` when argument does not fall into either of those
+    options.
+
+    Raises `ValueError` if argument is a column attribute that belongs to an
+    incorrect model class.
+
+    """
+    if hasattr(column, '__clause_element__'):
+        clause_element = column.__clause_element__()
+        if not isinstance(clause_element, Column):
+            msg = ('Column must be a string or a column attribute'
+                   ' of SQLAlchemy ORM class')
+            raise TypeError(msg)
+        model = column.class_
+        if model is not self.model:
+            msg = ('Cannot specify column of model {0} while creating API'
+                   ' for model {1}').format(model.__name__,
+                                            self.model.__name__)
+            raise ValueError(msg)
+        return clause_element.key
+    return column
 
 
 # This code comes from <http://stackoverflow.com/a/6798042/108197>, which is

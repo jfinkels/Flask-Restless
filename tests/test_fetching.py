@@ -38,7 +38,7 @@ from sqlalchemy.orm import relationship
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
 from flask.ext.restless import ProcessingException
-from flask.ext.restless.helpers import to_dict
+from flask.ext.restless.serialization import DefaultSerializer
 
 from .helpers import DatabaseTestBase
 from .helpers import FlaskTestBase
@@ -46,6 +46,7 @@ from .helpers import loads
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
 from .helpers import ManagerTestBase
+from .helpers import skip
 from .helpers import skip_unless
 from .helpers import unregister_fsa_session_signals
 
@@ -109,7 +110,7 @@ class TestFetching(ManagerTestBase):
         self.manager.create_api(Article)
         self.manager.create_api(Comment)
         self.manager.create_api(Person)
-        self.manager.create_api(Tag)
+        # self.manager.create_api(Tag)
 
     def test_serialize_time(self):
         """Test for getting the JSON representation of a time field."""
@@ -173,6 +174,7 @@ class TestFetching(ManagerTestBase):
         people = document['data']
         assert ['1', '2'] == sorted(person['id'] for person in people)
 
+    @skip('Currently not supported')
     def test_alternate_primary_key(self):
         """Tests that models with primary keys that are not named ``id`` are
         are still accessible via their primary keys.
@@ -186,6 +188,7 @@ class TestFetching(ManagerTestBase):
         tag = document['data']
         assert tag['id'] == 'foo'
 
+    @skip('Currently not supported')
     def test_primary_key_int_string(self):
         """Tests for getting a resource that has a string primary key,
         including the possibility of a string representation of a number.
@@ -200,27 +203,26 @@ class TestFetching(ManagerTestBase):
         assert tag['name'] == '1'
         assert tag['id'] == '1'
 
-    # TODO Not supported right now.
-    #
-    # def test_specified_primary_key(self):
-    #     """Tests that models with more than one primary key are accessible via
-    #     a primary key specified by the server.
+    @skip('Currently not supported')
+    def test_specified_primary_key(self):
+        """Tests that models with more than one primary key are accessible via
+        a primary key specified by the server.
 
-    #     """
-    #     article = self.Article(id=1, title='foo')
-    #     self.session.add(article)
-    #     self.session.commit()
-    #     self.manager.create_api(self.Article, url_prefix='/api2',
-    #                             primary_key='title')
-    #     response = self.app.get('/api2/article/1')
-    #     assert response.status_code == 404
-    #     response = self.app.get('/api2/article/foo')
-    #     assert response.status_code == 200
-    #     document = loads(response.data)
-    #     resource = document['data']
-    #     # Resource objects must have string IDs.
-    #     assert resource['id'] == str(article.id)
-    #     assert resource['title'] == article.title
+        """
+        article = self.Article(id=1, title='foo')
+        self.session.add(article)
+        self.session.commit()
+        self.manager.create_api(self.Article, url_prefix='/api2',
+                                primary_key='title')
+        response = self.app.get('/api2/article/1')
+        assert response.status_code == 404
+        response = self.app.get('/api2/article/foo')
+        assert response.status_code == 200
+        document = loads(response.data)
+        resource = document['data']
+        # Resource objects must have string IDs.
+        assert resource['id'] == str(article.id)
+        assert resource['title'] == article.title
 
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`200` if the
@@ -293,7 +295,6 @@ class TestFetching(ManagerTestBase):
         self.session.commit()
         response = self.app.get('/api/comment')
         document = loads(response.data)
-        print(document)
         comments = document['data']
         assert ['1'] == sorted(comment['id'] for comment in comments)
 
@@ -366,9 +367,10 @@ class TestFetching(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
+        defaultserializer = DefaultSerializer()
 
         def serializer(instance):
-            result = to_dict(instance)
+            result = defaultserializer(instance)
             result['foo'] = 'bar'
             return result
 
@@ -438,7 +440,6 @@ class TestServerSparseFieldsets(ManagerTestBase):
         response = self.app.get('/api/person/1')
         document = loads(response.data)
         person = document['data']
-        print(person)
         assert ['id', 'links', 'name', 'type'] == sorted(person)
         assert ['self'] == sorted(person['links'])
 
@@ -637,7 +638,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
         assert 'name' not in person
 
 
-class TestProcessors(DatabaseTestBase):
+class TestProcessors(ManagerTestBase):
     """Tests for pre- and postprocessors."""
 
     def setUp(self):
@@ -822,7 +823,7 @@ class TestProcessors(DatabaseTestBase):
         postprocessors = dict(GET_COLLECTION=[check_filters])
         self.manager.create_api(self.Person, postprocessors=postprocessors)
         query_string = {'filter[objects]': client_filters}
-        response = self.app.search('/api/person', query_string=query_string)
+        response = self.app.get('/api/person', query_string=query_string)
         assert response.status_code == 200
 
 

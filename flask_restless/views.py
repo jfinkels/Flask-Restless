@@ -36,7 +36,6 @@ from flask import request
 from flask.views import MethodView
 from mimerender import FlaskMimeRender
 from mimerender import register_mime
-from sqlalchemy import Column
 from sqlalchemy.exc import DataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
@@ -55,10 +54,7 @@ from .helpers import collection_name
 from .helpers import count
 from .helpers import evaluate_functions
 from .helpers import get_by
-# from .helpers import get_columns
-from .helpers import get_or_create
 from .helpers import get_related_model
-from .helpers import get_relations
 from .helpers import has_field
 from .helpers import is_like_list
 from .helpers import model_for
@@ -67,13 +63,13 @@ from .helpers import primary_key_name
 from .helpers import primary_key_value
 from .helpers import session_query
 from .helpers import strings_to_datetimes
-from .helpers import to_dict
 from .helpers import upper_keys
 from .helpers import url_for
 # from .helpers import get_related_association_proxy_model
 # from .search import create_query
 from .search import ComparisonToNull
 from .search import search
+from .serialization import ValidationError
 
 
 #: Format string for creating the complete URL for a paginated response.
@@ -119,14 +115,6 @@ class ProcessingException(HTTPException):
         super(ProcessingException, self).__init__(*args, **kwargs)
         self.code = code
         self.description = description
-
-
-class ValidationError(Exception):
-    """Raised when there is a problem deserializing a dictionary into an
-    instance of a SQLAlchemy model.
-
-    """
-    pass
 
 
 def _is_msie8or9():
@@ -404,12 +392,13 @@ def _parse_includes(column_names):
     return columns, relations
 
 
-def parse_sparse_fields():
+def parse_sparse_fields(type_=None):
     # TODO use a regular expression to ensure field parameters are of the
     # correct format? (maybe ``field\[[^\[\]\.]*\]``)
-    return {key[7:-1]: set(value.split(','))
-            for key, value in request.args.items()
-            if key.startswith('fields[') and key.endswith(']')}
+    fields = {key[7:-1]: set(value.split(','))
+              for key, value in request.args.items()
+              if key.startswith('fields[') and key.endswith(']')}
+    return fields.get(type_) if type_ is not None else fields
 
 
 def _parse_excludes(column_names):
@@ -697,10 +686,8 @@ class API(APIBase):
 
     """
 
-    def __init__(self, session, model, exclude_columns=None,
-                 include_columns=None, include_methods=None,
-                 page_size=10, max_page_size=100, serializer=None,
-                 deserializer=None, includes=None,
+    def __init__(self, session, model, page_size=10, max_page_size=100,
+                 serializer=None, deserializer=None, includes=None,
                  allow_client_generated_ids=False, allow_delete_many=False,
                  *args, **kw):
         """Instantiates this view with the specified attributes.
@@ -837,24 +824,6 @@ class API(APIBase):
 
         """
         super(API, self).__init__(session, model, *args, **kw)
-        if exclude_columns is None:
-            self.exclude_columns, self.exclude_relations = (None, None)
-        else:
-            self.exclude_columns, self.exclude_relations = _parse_excludes(
-                [self._get_column_name(column) for column in exclude_columns])
-        if include_columns is None:
-            self.include_columns, self.include_relations = (None, None)
-        else:
-            self.include_columns, self.include_relations = _parse_includes(
-                [self._get_column_name(column) for column in include_columns])
-        self.include_methods = include_methods
-        # TODO this keyword argument doesn't exist yet
-        #
-        #     self.default_fields = fields
-        #
-        self.default_fields = None
-        if self.default_fields is not None:
-            self.default_fields = frozenset(self.default_fields)
         self.default_includes = includes
         if self.default_includes is not None:
             self.default_includes = frozenset(self.default_includes)
@@ -875,382 +844,6 @@ class API(APIBase):
                                                + [ValidationError])
         else:
             self.deserialize = deserializer
-
-    def _get_column_name(self, column):
-        """Retrieve a column name from a column attribute of SQLAlchemy
-        model class, or a string.
-
-        Raises `TypeError` when argument does not fall into either of those
-        options.
-
-        Raises `ValueError` if argument is a column attribute that belongs
-        to an incorrect model class.
-
-        """
-        if hasattr(column, '__clause_element__'):
-            clause_element = column.__clause_element__()
-            if not isinstance(clause_element, Column):
-                msg = ('Column must be a string or a column attribute'
-                       ' of SQLAlchemy ORM class')
-                raise TypeError(msg)
-            model = column.class_
-            if model is not self.model:
-                msg = ('Cannot specify column of model {0} while creating API'
-                       ' for model {1}').format(model.__name__,
-                                                self.model.__name__)
-                raise ValueError(msg)
-            return clause_element.key
-
-        return column
-
-    def _add_to_relation(self, query, relationname, toadd=None):
-        """Adds a new or existing related model to each model specified by
-        `query`.
-
-        This function does not commit the changes made to the database. The
-        calling function has that responsibility.
-
-        `query` is a SQLAlchemy query instance that evaluates to all instances
-        of the model specified in the constructor of this class that should be
-        updated.
-
-        `relationname` is the name of a one-to-many relationship which exists
-        on each model specified in `query`.
-
-        `toadd` is a list of dictionaries, each representing the attributes of
-        an existing or new related model to add. If a dictionary contains the
-        key ``'id'``, that instance of the related model will be
-        added. Otherwise, the :func:`helpers.get_or_create` class method will
-        be used to get or create a model to add.
-
-        """
-        submodel = get_related_model(self.model, relationname)
-        if isinstance(toadd, dict):
-            toadd = [toadd]
-        for dictionary in toadd or []:
-            subinst = get_or_create(self.session, submodel, dictionary)
-            try:
-                for instance in query:
-                    getattr(instance, relationname).append(subinst)
-            except AttributeError as exception:
-                current_app.logger.exception(str(exception))
-                setattr(instance, relationname, subinst)
-
-    def _remove_from_relation(self, query, relationname, toremove=None):
-        """Removes a related model from each model specified by `query`.
-
-        This function does not commit the changes made to the database. The
-        calling function has that responsibility.
-
-        `query` is a SQLAlchemy query instance that evaluates to all instances
-        of the model specified in the constructor of this class that should be
-        updated.
-
-        `relationname` is the name of a one-to-many relationship which exists
-        on each model specified in `query`.
-
-        `toremove` is a list of dictionaries, each representing the attributes
-        of an existing model to remove. If a dictionary contains the key
-        ``'id'``, that instance of the related model will be
-        removed. Otherwise, the instance to remove will be retrieved using the
-        other attributes specified in the dictionary. If multiple instances
-        match the specified attributes, only the first instance will be
-        removed.
-
-        If one of the dictionaries contains a mapping from ``'__delete__'`` to
-        ``True``, then the removed object will be deleted after being removed
-        from each instance of the model in the specified query.
-
-        """
-        submodel = get_related_model(self.model, relationname)
-        for dictionary in toremove or []:
-            remove = dictionary.pop('__delete__', False)
-            if 'id' in dictionary:
-                subinst = get_by(self.session, submodel, dictionary['id'])
-            else:
-                subinst = self.query(submodel).filter_by(**dictionary).first()
-            for instance in query:
-                getattr(instance, relationname).remove(subinst)
-            if remove:
-                self.session.delete(subinst)
-
-    def _set_on_relation(self, query, relationname, toset=None):
-        """Sets the value of the relation specified by `relationname` on each
-        instance specified by `query` to have the new or existing related
-        models specified by `toset`.
-
-        This function does not commit the changes made to the database. The
-        calling function has that responsibility.
-
-        `query` is a SQLAlchemy query instance that evaluates to all instances
-        of the model specified in the constructor of this class that should be
-        updated.
-
-        `relationname` is the name of a one-to-many relationship which exists
-        on each model specified in `query`.
-
-        `toset` is either a dictionary or a list of dictionaries, each
-        representing the attributes of an existing or new related model to
-        set. If a dictionary contains the key ``'id'``, that instance of the
-        related model will be added. Otherwise, the
-        :func:`helpers.get_or_create` method will be used to get or create a
-        model to set.
-
-        """
-        submodel = get_related_model(self.model, relationname)
-        if isinstance(toset, list):
-            value = [get_or_create(self.session, submodel, d) for d in toset]
-        else:
-            value = get_or_create(self.session, submodel, toset)
-        for instance in query:
-            setattr(instance, relationname, value)
-
-    # TODO change this to have more sensible arguments
-    def _update_relations(self, query, params):
-        """Adds, removes, or sets models which are related to the model
-        specified in the constructor of this class.
-
-        This function does not commit the changes made to the database. The
-        calling function has that responsibility.
-
-        This method returns a :class:`frozenset` of strings representing the
-        names of relations which were modified.
-
-        `query` is a SQLAlchemy query instance that evaluates to all instances
-        of the model specified in the constructor of this class that should be
-        updated.
-
-        `params` is a dictionary containing a mapping from name of the relation
-        to modify (as a string) to either a list or another dictionary. In the
-        former case, the relation will be assigned the instances specified by
-        the elements of the list, which are dictionaries as described below.
-        In the latter case, the inner dictionary contains at most two mappings,
-        one with the key ``'add'`` and one with the key ``'remove'``. Each of
-        these is a mapping to a list of dictionaries which represent the
-        attributes of the object to add to or remove from the relation.
-
-        If one of the dictionaries specified in ``add`` or ``remove`` (or the
-        list to be assigned) includes an ``id`` key, the object with that
-        ``id`` will be attempt to be added or removed. Otherwise, an existing
-        object with the specified attribute values will be attempted to be
-        added or removed. If adding, a new object will be created if a matching
-        object could not be found in the database.
-
-        If a dictionary in one of the ``'remove'`` lists contains a mapping
-        from ``'__delete__'`` to ``True``, then the removed object will be
-        deleted after being removed from each instance of the model in the
-        specified query.
-
-        """
-        relations = get_relations(self.model)
-        tochange = frozenset(relations) & frozenset(params)
-        for columnname in tochange:
-            # Check if 'add' or 'remove' is being used
-            if (isinstance(params[columnname], dict)
-                and any(k in params[columnname] for k in ['add', 'remove'])):
-
-                toadd = params[columnname].get('add', [])
-                toremove = params[columnname].get('remove', [])
-                self._add_to_relation(query, columnname, toadd=toadd)
-                self._remove_from_relation(query, columnname,
-                                           toremove=toremove)
-            else:
-                toset = params[columnname]
-                self._set_on_relation(query, columnname, toset=toset)
-
-        return tochange
-
-    def _compute_page_size(self):
-        """Helper function which returns the number of results per page based
-        on the request argument ``results_per_page`` and the server
-        configuration parameters :attr:`results_per_page` and
-        :attr:`max_results_per_page`.
-
-        """
-        try:
-            page_size = int(request.args.get('page[size]'))
-        except:
-            page_size = self.page_size
-        if page_size <= 0:
-            page_size = self.page_size
-        return min(page_size, self.max_page_size)
-
-    # TODO it is ugly to have `deep` as an arg here; can we remove it?
-    def _paginated(self, instances, type_, deep):
-        """Returns a paginated JSONified response from the specified list of
-        model instances.
-
-        `instances` is either a Python list of model instances or a
-        :class:`~sqlalchemy.orm.Query`.
-
-        `deep` is the dictionary which defines the depth of submodels to output
-        in the JSON format of the model instances in `instances`; it is passed
-        directly to :func:`helpers.to_dict`.
-
-        The response data is JSON of the form:
-
-        .. sourcecode:: javascript
-
-           {
-             "page": 2,
-             "total_pages": 3,
-             "num_results": 8,
-             "objects": [{"id": 1, "name": "Jeffrey", "age": 24}, ...]
-           }
-
-        """
-        if isinstance(instances, list):
-            num_results = len(instances)
-        else:
-            num_results = count(self.session, instances)
-        page_size = self._compute_page_size()
-        if page_size > 0:
-            # get the page number (first page is page 1)
-            page_num = int(request.args.get('page[number]', 1))
-            start = (page_num - 1) * page_size
-            end = min(num_results, start + page_size)
-            total_pages = int(math.ceil(num_results / page_size))
-        else:
-            page_num = 1
-            start = 0
-            end = num_results
-            total_pages = 1
-        objects = [to_dict(x, type_=type_, deep=deep,
-                           exclude=self.exclude_columns,
-                           exclude_relations=self.exclude_relations,
-                           include=self.include_columns,
-                           include_relations=self.include_relations,
-                           include_methods=self.include_methods)
-                   for x in instances[start:end]]
-        return dict(meta=dict(page=page_num, total_pages=total_pages,
-                              num_results=num_results),
-                    objects=objects)
-
-    def _inst_to_dict(self, inst, only=None):
-        """Returns the dictionary representation of the specified instance.
-
-        If `only` is specified, only the attributes whose names are given as
-        strings in this set appear in the returned dictionary.
-
-        If `only` is not specified, this method uses the include and exclude
-        columns specified in the constructor of this class.
-
-        """
-        # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
-        # do not follow relations that will not be included in the response
-        if self.include_columns is not None:
-            cols = frozenset(self.include_columns)
-            rels = frozenset(self.include_relations)
-            relations &= (cols | rels)
-        elif self.exclude_columns is not None:
-            relations -= frozenset(self.exclude_columns)
-        # Always include at least the type and ID, regardless of what the user
-        # requested.
-        if only is not None:
-            if 'type' not in only:
-                only.add('type')
-            if 'id' not in only:
-                only.add('id')
-        result = to_dict(inst, only)
-        return result
-
-    def _dict_to_inst(self, data):
-        """Returns an instance of the model with the specified attributes."""
-        # Check for any request parameter naming a column which does not exist
-        # on the current model.
-        for field in data:
-            if field == 'links':
-                for relation in data['links']:
-                    if not has_field(self.model, relation):
-                        msg = ('Model does not have relationship'
-                               ' "{0}"').format(relation)
-                        raise ValidationError(msg)
-            elif not has_field(self.model, field):
-                msg = "Model does not have field '{0}'".format(field)
-                raise ValidationError(msg)
-        # Determine which related instances need to be added.
-        links = {}
-        if 'links' in data:
-            links = data.pop('links', {})
-            for link_name, link_object in links.items():
-                related_model = get_related_model(self.model, link_name)
-                # TODO check for type conflicts
-                #
-                # If this is a to-many relationship, get all the instances.
-                if isinstance(link_object, list):
-                    related_instances = [get_by(self.session, related_model,
-                                                rel['id'])
-                                         for rel in link_object]
-                    links[link_name] = related_instances
-                # Otherwise, if this is a to-one relationship, just get a
-                # single instance.
-                else:
-                    id_ = link_object['id']
-                    related_instance = get_by(self.session, related_model, id_)
-                    links[link_name] = related_instance
-        # TODO Need to check here if any related instances are None, like we do
-        # in the put() method.
-        pass
-        # Special case: if there are any dates, convert the string form of the
-        # date into an instance of the Python ``datetime`` object.
-        #
-        # TODO This should be done as part of _dict_to_inst(), not done on its
-        # own here.
-        data = strings_to_datetimes(self.model, data)
-        # Create the new instance by keyword attributes.
-        instance = self.model(**data)
-        # Set each relation specified in the links.
-        for relation_name, related_value in links.items():
-            setattr(instance, relation_name, related_value)
-        return instance
-        # # Getting the list of relations that will be added later
-        # cols = get_columns(self.model)
-        # relations = get_relations(self.model)
-
-        # # Looking for what we're going to set on the model right now
-        # colkeys = cols.keys()
-        # paramkeys = (data.keys() - {'links'}) | data.get('links', {}).keys()
-        # props = set(colkeys).intersection(paramkeys).difference(relations)
-
-        # # Special case: if there are any dates, convert the string form of the
-        # # date into an instance of the Python ``datetime`` object.
-        # data = strings_to_dates(self.model, data)
-        # # Instantiate the model with the parameters.
-        # modelargs = dict([(i, data[i]) for i in props])
-        # instance = self.model(**modelargs)
-        # # Handling relations, a single level is allowed
-        # for col in set(relations).intersection(paramkeys):
-        #     submodel = get_related_model(self.model, col)
-        #     if type(data['links'][col]) == list:
-        #         # model has several related objects
-        #         for subparams in data[col]:
-        #             subinst = get_or_create(self.session, submodel,
-        #                                     subparams)
-        #             try:
-        #                 getattr(instance, col).append(subinst)
-        #             except AttributeError:
-        #                 attribute = getattr(instance, col)
-        #                 attribute[subinst.key] = subinst.value
-        #     else:
-        #         # model has single related object
-        #         subinst = get_or_create(self.session, submodel,
-        #                                 data[col])
-        #         setattr(instance, col, subinst)
-        # return instance
-
-    def _instid_to_dict(self, instid, only=None):
-        """Returns the dictionary representation of the instance specified by
-        `instid`.
-
-        If no such instance of the model exists, this method aborts with a
-        :http:statuscode:`404`.
-
-        """
-        inst = get_by(self.session, self.model, instid, self.primary_key)
-        if inst is None:
-            return {_STATUS: 404}, 404
-        return self._inst_to_dict(inst, only)
 
     def _search(self):
         """Defines a generic search function for the database model.
@@ -1400,11 +993,12 @@ class API(APIBase):
         #     relations -= frozenset(self.exclude_columns)
         # deep = dict((r, {}) for r in relations)
 
-        # Determine fields to include for each type of object.
-        fields = parse_sparse_fields()
-        if self.collection_name in fields and self.default_fields is not None:
-            fields[self.collection_name] |= self.default_fields
-        fields = fields.get(self.collection_name)
+        # Determine the client's request for which fields to include for this
+        # type of object.
+        fields = parse_sparse_fields(self.collection_name)
+        # if self.collection_name in fields and self.default_fields is not None:
+        #     fields[self.collection_name] |= self.default_fields
+        #fields = fields.get(self.collection_name)
 
         # If the result of the search is a SQLAlchemy query object, we need to
         # return a collection.
@@ -1433,7 +1027,7 @@ class API(APIBase):
                     detail = 'Page number must be a positive integer'
                     return error_response(400, detail=detail)
                 # If the query is really a Flask-SQLAlchemy query, we can use
-                # the its built-in pagination.
+                # its built-in pagination.
                 if hasattr(result, 'paginate'):
                     pagination = result.paginate(page_number, page_size,
                                                  error_out=False)
@@ -1536,8 +1130,6 @@ class API(APIBase):
             return error_response(404, detail=message)
         # Get the fields to include for each type of object.
         fields = parse_sparse_fields()
-        if self.collection_name in fields and self.default_fields is not None:
-            fields[self.collection_name] |= self.default_fields
         # If no relation is requested, just return the instance. Otherwise,
         # get the value of the relation specified by `relationname`.
         if relationname is None:
@@ -1597,7 +1189,9 @@ class API(APIBase):
         if isinstance(original, list):
             has_links = any('links' in resource for resource in original)
         else:
-            has_links = 'links' in original
+            # If the original data is an empty to-one relation, it could be
+            # None.
+            has_links = original is not None and 'links' in original
         if not has_links:
             return {}
         # Add any links requested to be included by URL parameters.
@@ -1700,7 +1294,7 @@ class API(APIBase):
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode search query')
 
-        for preprocessor in self.preprocessors['DELETE_MANY']:
+        for preprocessor in self.preprocessors['DELETE_COLLECTION']:
             preprocessor(filters=filters)
 
         # perform a filtered search
@@ -1736,9 +1330,10 @@ class API(APIBase):
             self.session.delete(result)
             num_deleted = 1
         self.session.commit()
-        for postprocessor in self.postprocessors['DELETE_MANY']:
-            postprocessor(search_params=search_params, num_deleted=num_deleted)
-        return {}, 204
+        for postprocessor in self.postprocessors['DELETE_COLLECTION']:
+            postprocessor(num_deleted=num_deleted)
+        result = dict(meta=dict(total=num_deleted))
+        return result, 200
 
     def delete(self, instid, relationname, relationinstid):
         """Removes the specified instance of the model with the specified name
@@ -1766,19 +1361,14 @@ class API(APIBase):
                 detail = 'Server does not allow deleting from a collection'
                 return error_response(405, detail=detail)
             return self._delete_many()
-        was_deleted = False
-        for preprocessor in self.preprocessors['DELETE_SINGLE']:
+        for preprocessor in self.preprocessors['DELETE_RESOURCE']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname,
                                        relation_instance_id=relationinstid)
             # See the note under the preprocessor in the get() method.
             if temp_result is not None:
                 instid = temp_result
-        # if ',' in instid:
-        #     ids = instid.split(',')
-        #     inst = [get_by(self.session, self.model, id_, self.primary_key)
-        #             for id_ in ids]
-        # else:
+        was_deleted = False
         inst = get_by(self.session, self.model, instid, self.primary_key)
         if relationname is not None:
             # If no such relation exists, return an error to the client.
@@ -1823,7 +1413,7 @@ class API(APIBase):
                 self.session.delete(instance)
             was_deleted = len(self.session.deleted) > 0
         self.session.commit()
-        for postprocessor in self.postprocessors['DELETE_SINGLE']:
+        for postprocessor in self.postprocessors['DELETE_RESOURCE']:
             postprocessor(was_deleted=was_deleted)
         if not was_deleted:
             detail = 'There was no instance to delete.'
@@ -2133,7 +1723,7 @@ class API(APIBase):
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-        for preprocessor in self.preprocessors['PUT_SINGLE']:
+        for preprocessor in self.preprocessors['PUT_RESOURCE']:
             temp_result = preprocessor(instance_id=instid, data=data)
             # See the note under the preprocessor in the get() method.
             if temp_result is not None:
@@ -2218,16 +1808,16 @@ class API(APIBase):
             result = dict()
             status = 204
         # Perform any necessary postprocessing.
-        for postprocessor in self.postprocessors['PUT_SINGLE']:
+        for postprocessor in self.postprocessors['PUT_RESOURCE']:
             postprocessor()
         return result, status
 
 
 class RelationshipAPI(APIBase):
 
-    def __init__(self, allow_delete_from_to_many_relationships=False,
-                 **kw):
-        super(RelationshipAPI, self).__init__(*args, **kw)
+    def __init__(self, session, model,
+                 allow_delete_from_to_many_relationships=False, *args, **kw):
+        super(RelationshipAPI, self).__init__(session, model, *args, **kw)
         self.allow_delete_from_to_many_relationships = \
             allow_delete_from_to_many_relationships
 
@@ -2306,7 +1896,7 @@ class RelationshipAPI(APIBase):
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-        for preprocessor in self.preprocessors['PUT_SINGLE']:
+        for preprocessor in self.preprocessors['PUT_RESOURCE']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname, data=data)
             # See the note under the preprocessor in the get() method.
