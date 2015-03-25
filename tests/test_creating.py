@@ -43,7 +43,7 @@ from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
-from flask.ext.restless.helpers import to_dict
+from flask.ext.restless.serialization import DefaultSerializer
 
 from .helpers import dumps
 from .helpers import DatabaseTestBase
@@ -96,6 +96,9 @@ class TestCreating(ManagerTestBase):
         class Tag(self.Base):
             __tablename__ = 'tag'
             name = Column(Unicode, primary_key=True)
+            # TODO this dummy column is required to create an API for this
+            # object.
+            id = Column(Integer)
 
         self.Article = Article
         self.Person = Person
@@ -452,11 +455,11 @@ class TestCreating(ManagerTestBase):
 
     def test_custom_serialization(self):
         """Tests for custom deserialization."""
-
         temp = []
+        defaultserializer = DefaultSerializer()
 
         def serializer(instance):
-            result = to_dict(instance)
+            result = defaultserializer(instance)
             result['foo'] = temp.pop()
             return result
 
@@ -542,7 +545,9 @@ class TestAssociationProxy(ManagerTestBase):
             article = relationship(Article, backref=backref('articletags'))
             tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
             tag = relationship('Tag')
-            # extra_info = Column(Unicode)
+            # TODO this dummy column is required to create an API for this
+            # object.
+            id = Column(Integer)
 
         class Tag(self.Base):
             __tablename__ = 'tag'
