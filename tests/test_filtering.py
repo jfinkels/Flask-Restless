@@ -679,7 +679,10 @@ class TestAssociationProxy(SearchTestBase):
             article = relationship(Article, backref=backref('articletags'))
             tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
             tag = relationship('Tag')
-            # extra_info = Column(Unicode)
+            # TODO this dummy column is required to create an API for this
+            # object.
+            id = Column(Integer)
+
 
         class Tag(self.Base):
             __tablename__ = 'tag'

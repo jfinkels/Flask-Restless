@@ -970,6 +970,9 @@ class TestAssociationProxy(ManagerTestBase):
             article = relationship(Article, backref=backref('articletags'))
             tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
             tag = relationship('Tag')
+            # TODO this dummy column is required to create an API for this
+            # object.
+            id = Column(Integer)
 
         class Tag(self.Base):
             __tablename__ = 'tag'
@@ -1001,6 +1004,9 @@ class TestAssociationProxy(ManagerTestBase):
             keyword_id = Column(Integer, ForeignKey('keyword.id'),
                                 primary_key=True)
             keyword = relationship('Keyword')
+            # TODO this dummy column is required to create an API for this
+            # object.
+            id = Column(Integer)
 
         class Keyword(self.Base):
             __tablename__ = 'keyword'
@@ -1063,7 +1069,8 @@ class TestAssociationProxy(ManagerTestBase):
         article.tags = [tag1, tag2]
         self.session.add_all([article, tag1, tag2])
         self.session.commit()
-        data = dict(data=dict(type='article', id='1', tag_names=['foo', 'bar']))
+        tag_names = ['foo', 'bar']
+        data = dict(data=dict(type='article', id='1', tag_names=tag_names))
         response = self.app.put('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert ['foo', 'bar'] == article.tag_names

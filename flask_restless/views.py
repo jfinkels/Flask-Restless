@@ -964,7 +964,7 @@ class API(APIBase):
             detail = 'Invalid format for filter[single] query parameter'
             return error_response(400, detail=detail)
 
-        for preprocessor in self.preprocessors['GET_MANY']:
+        for preprocessor in self.preprocessors['GET_COLLECTION']:
             preprocessor(filters=filters, sort=sort, single=single)
 
         # Compute the result of the search on the model.
@@ -1101,8 +1101,9 @@ class API(APIBase):
         result['links']['self'] = url_for(self.model)
         result['links'].update(pagination_links)
 
-        for postprocessor in self.postprocessors['GET_MANY']:
-            postprocessor(result=result, sort=sort)
+        for postprocessor in self.postprocessors['GET_COLLECTION']:
+            postprocessor(result=result, filters=filters, sort=sort,
+                          single=single)
 
         # HACK Provide the headers directly in the result dictionary, so that
         # the :func:`jsonpify` function has access to them. See the note there
@@ -1112,7 +1113,7 @@ class API(APIBase):
         return result, 200, headers
 
     def _get_single(self, instid, relationname=None, relationinstid=None):
-        for preprocessor in self.preprocessors['GET_SINGLE']:
+        for preprocessor in self.preprocessors['GET_RESOURCE']:
             temp_result = preprocessor(instance_id=instid)
             # Let the return value of the preprocessor be the new value of
             # instid, thereby allowing the preprocessor to effectively specify
@@ -1179,7 +1180,7 @@ class API(APIBase):
             fields_for_this = fields.get(link)
             result['included'].extend(self.serialize(x, only=fields_for_this)
                                       for x in related_instances)
-        for postprocessor in self.postprocessors['GET_SINGLE']:
+        for postprocessor in self.postprocessors['GET_RESOURCE']:
             postprocessor(result=result)
         return result, 200
 

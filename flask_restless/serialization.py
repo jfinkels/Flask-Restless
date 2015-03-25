@@ -6,6 +6,7 @@ except ImportError:
 import uuid
 
 from flask import request
+from sqlalchemy import Column
 from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.ext.hybrid import HYBRID_PROPERTY
 from sqlalchemy.inspection import inspect
@@ -38,6 +39,24 @@ class ValidationError(Exception):
     pass
 
 
+def get_column_name(column):
+    """Retrieve a column name from a column attribute of SQLAlchemy model
+    class, or a string.
+
+    Raises `TypeError` when argument does not fall into either of those
+    options.
+
+    """
+    # TODO use inspection API here
+    if hasattr(column, '__clause_element__'):
+        clause_element = column.__clause_element__()
+        if not isinstance(clause_element, Column):
+            msg = 'Expected a column attribute of a SQLAlchemy ORM class'
+            raise TypeError(msg)
+        return clause_element.key
+    return column
+
+
 class Serializer:
 
     def __call__(self, instance, only=None):
@@ -66,6 +85,16 @@ class DefaultSerializer(Serializer):
             any(attr in exclude for attr in additional_attributes)):
             raise ValueError('Cannot exclude attributes listed in the'
                              ' `additional_attributes` keyword argument')
+        # Always include at least the type and ID, regardless of what the user
+        # specified.
+        if only is not None:
+            # Convert SQLAlchemy Column objects to strings if necessary.
+            only = {get_column_name(column) for column in only}
+            # TODO Should the 'self' link be mandatory as well?
+            only |= {'type', 'id'}
+        if exclude is not None:
+            # Convert SQLAlchemy Column objects to strings if necessary.
+            exclude = {get_column_name(column) for column in exclude}
         self.default_fields = only
         self.exclude = exclude
         self.additional_attributes = additional_attributes
@@ -95,8 +124,7 @@ class DefaultSerializer(Serializer):
         # of what the user requested.
         if only is not None:
             # TODO Should the 'self' link be mandatory as well?
-            mandatory_fields = ('type', 'id')
-            only |= {name for name in mandatory_fields if name not in only}
+            only = set(only) | {'type', 'id'}
         model = type(instance)
         try:
             inspected_instance = inspect(model)
@@ -110,15 +138,29 @@ class DefaultSerializer(Serializer):
         hybrid_columns = [k for k, d in descriptors
                           if d.extension_type == HYBRID_PROPERTY]
         columns = column_attrs + hybrid_columns
-        # Exclude column names that are blacklisted.
-        columns = (c for c in columns
-                   if not c.startswith('__') and c not in COLUMN_BLACKLIST)
+        # Also include any attributes specified by the user.
+        if self.additional_attributes is not None:
+            columns += self.additional_attributes
+
+        # Only include fields allowed by the user during the instantiation of
+        # this object.
+        if self.default_fields is not None:
+            columns = (c for c in columns if c in self.default_fields)
         # If `only` is a list, only include those columns that are in the list.
         if only is not None:
             columns = (c for c in columns if c in only)
+
+        # Exclude columns specified by the user during the instantiation of
+        # this object.
+        if self.exclude is not None:
+            columns = (c for c in columns if c not in self.exclude)
+        # Exclude column names that are blacklisted.
+        columns = (c for c in columns
+                   if not c.startswith('__') and c not in COLUMN_BLACKLIST)
         # Exclude column names that are foreign keys.
         foreign_key_columns = foreign_keys(model)
         columns = (c for c in columns if c not in foreign_key_columns)
+
         # Create a dictionary mapping attribute name to attribute value for
         # this particular instance.
         result = {column: getattr(instance, column) for column in columns}
@@ -127,7 +169,8 @@ class DefaultSerializer(Serializer):
         # Add the resource type to the result dictionary.
         result['type'] = collection_name(model)
         # Add the self link unless it has been explicitly excluded.
-        if only is None or 'self' in only:
+        if ((self.default_fields is None or 'self' in self.default_fields)
+            and (only is None or 'self' in only)):
             instance_id = primary_key_value(instance)
             url = urljoin(request.url_root, url_for(model, instance_id))
             result['links'] = dict(self=url)
@@ -159,7 +202,7 @@ class DefaultSerializer(Serializer):
             # TODO really we need to serialize each model using the serializer
             # defined for that class when the user called APIManager.create_api
             elif key not in column_attrs and is_mapped_class(type(value)):
-                result[key] = self(value)
+                result[key] = simple_serialize(value)
         # If the primary key is not named "id", we'll duplicate the primary key
         # under the "id" key.
         pk_name = primary_key_name(model)
@@ -174,51 +217,57 @@ class DefaultSerializer(Serializer):
         # If there are relations to convert to dictionary form, put them into a
         # special `links` key as required by JSON API.
         relations = get_relations(model)
+        if self.default_fields is not None:
+            relations = [r for r in relations if r in self.default_fields]
         # Only consider those relations listed in `only`.
         if only is not None:
             relations = [r for r in relations if r in only]
-        if relations:
-            # The links mapping may already exist if a self link was added
-            # above.
-            if 'links' not in result:
-                result['links'] = {}
-            for relation in relations:
-                # Create the common elements in the link object: the `self` and
-                # `resource` links.
-                result['links'][relation] = {}
-                link = result['links'][relation]
-                link['self'] = url_for(model, primary_key_value(instance),
-                                       relation, relationship=True)
-                link['related'] = url_for(model, primary_key_value(instance),
-                                          relation)
-                # Get the related value so we can see if it is a to-many
-                # relationship or a to-one relationship.
-                related_value = getattr(instance, relation)
-                # If the related value is list-like, it represents a to-many
-                # relationship.
-                if is_like_list(instance, relation):
-                    # For the sake of brevity, rename these functions.
-                    cn = collection_name
-                    gm = get_model
-                    pkv = primary_key_value
-                    # Create the link objects.
-                    link['linkage'] = [dict(type=cn(gm(i)), id=str(pkv(i)))
-                                       for i in related_value]
-                    continue
-                # At this point, we know we have a to-one relationship.
-                related_model = get_related_model(model, relation)
-                link['linkage'] = dict(type=collection_name(related_model))
-                # If the related value is None, that means we have an empty
-                # to-one relationship.
-                if related_value is None:
-                    link['linkage']['id'] = None
-                    continue
-                # If the related value is dynamically loaded, resolve the query
-                # to get the single instance in the to-one relationship.
-                if isinstance(related_value, Query):
-                    related_value = related_value.one()
-                link['linkage']['id'] = str(primary_key_value(related_value))
+        if not relations:
+            return result
+        # The links mapping may already exist if a self link was added
+        # above.
+        if 'links' not in result:
+            result['links'] = {}
+        for relation in relations:
+            # Create the common elements in the link object: the `self` and
+            # `resource` links.
+            result['links'][relation] = {}
+            link = result['links'][relation]
+            link['self'] = url_for(model, primary_key_value(instance),
+                                   relation, relationship=True)
+            link['related'] = url_for(model, primary_key_value(instance),
+                                      relation)
+            # Get the related value so we can see if it is a to-many
+            # relationship or a to-one relationship.
+            related_value = getattr(instance, relation)
+            # If the related value is list-like, it represents a to-many
+            # relationship.
+            if is_like_list(instance, relation):
+                # For the sake of brevity, rename these functions.
+                cn = collection_name
+                gm = get_model
+                pkv = primary_key_value
+                # Create the link objects.
+                link['linkage'] = [dict(type=cn(gm(i)), id=str(pkv(i)))
+                                   for i in related_value]
+                continue
+            # At this point, we know we have a to-one relationship.
+            related_model = get_related_model(model, relation)
+            link['linkage'] = dict(type=collection_name(related_model))
+            # If the related value is None, that means we have an empty
+            # to-one relationship.
+            if related_value is None:
+                link['linkage']['id'] = None
+                continue
+            # If the related value is dynamically loaded, resolve the query
+            # to get the single instance in the to-one relationship.
+            if isinstance(related_value, Query):
+                related_value = related_value.one()
+            link['linkage']['id'] = str(primary_key_value(related_value))
         return result
+
+
+simple_serialize = DefaultSerializer()
 
 
 class DefaultDeserializer(Deserializer):

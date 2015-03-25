@@ -41,6 +41,7 @@ from flask.ext.restless import ProcessingException
 from flask.ext.restless.serialization import DefaultSerializer
 
 from .helpers import DatabaseTestBase
+from .helpers import dumps
 from .helpers import FlaskTestBase
 from .helpers import loads
 from .helpers import MSIE8_UA
@@ -369,13 +370,14 @@ class TestFetching(ManagerTestBase):
         self.session.commit()
         defaultserializer = DefaultSerializer()
 
-        def serializer(instance):
+        def serializer(instance, only=None):
             result = defaultserializer(instance)
             result['foo'] = 'bar'
             return result
 
-        self.manager.create_api(self.Person, serializer=serializer)
-        response = self.app.get('/api/person/1')
+        self.manager.create_api(self.Person, serializer=serializer,
+                                url_prefix='/api2')
+        response = self.app.get('/api2/person/1')
         document = loads(response.data)
         person = document['data']
         assert person['foo'] == 'bar'
@@ -440,8 +442,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
         response = self.app.get('/api/person/1')
         document = loads(response.data)
         person = document['data']
-        assert ['id', 'links', 'name', 'type'] == sorted(person)
-        assert ['self'] == sorted(person['links'])
+        assert ['id', 'name', 'type'] == sorted(person)
 
     def test_only_relationship(self):
         """Tests for specifying that response should only include certain
@@ -456,7 +457,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         assert ['id', 'links', 'type'] == sorted(person)
-        assert ['articles', 'self'] == sorted(person['links'])
+        assert ['articles'] == sorted(person['links'])
 
     # # TODO This doesn't exactly make sense anymore; each type of included
     # # resource should really determine its own sparse fieldsets.
@@ -498,8 +499,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
         response = self.app.get('/api/person/1')
         document = loads(response.data)
         person = document['data']
-        assert ['id', 'links', 'name', 'type'] == sorted(person)
-        assert ['self'] == sorted(person['links'])
+        assert ['id', 'name', 'type'] == sorted(person)
 
     def test_only_none(self):
         """Tests that providing an empty list as the list of fields to include
@@ -514,8 +514,7 @@ class TestServerSparseFieldsets(ManagerTestBase):
         response = self.app.get('/api/person/1')
         document = loads(response.data)
         person = document['data']
-        assert ['id', 'links', 'type'] == sorted(person)
-        assert ['self'] == sorted(person['links'])
+        assert ['id', 'type'] == sorted(person)
 
     def test_additional_attributes(self):
         """Tests that additional attributes other than SQLAlchemy columns can
@@ -657,7 +656,6 @@ class TestProcessors(ManagerTestBase):
 
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Person)
 
     def test_single_resource_processing_exception(self):
         """Tests for a preprocessor that raises a :exc:`ProcessingException`
@@ -799,7 +797,7 @@ class TestProcessors(ManagerTestBase):
         preprocessors = dict(GET_COLLECTION=[restrict_ids])
         self.manager.create_api(self.Person, preprocessors=preprocessors)
         filters = [dict(name='id', op='in', val=[1, 3])]
-        query = {'filter[objects]': filters}
+        query = {'filter[objects]': dumps(filters)}
         response = self.app.get('/api/person', query_string=query)
         assert response.status_code == 200
         document = loads(response.data)
@@ -822,7 +820,7 @@ class TestProcessors(ManagerTestBase):
 
         postprocessors = dict(GET_COLLECTION=[check_filters])
         self.manager.create_api(self.Person, postprocessors=postprocessors)
-        query_string = {'filter[objects]': client_filters}
+        query_string = {'filter[objects]': dumps(client_filters)}
         response = self.app.get('/api/person', query_string=query_string)
         assert response.status_code == 200
 
@@ -959,7 +957,9 @@ class TestAssociationProxy(ManagerTestBase):
             article = relationship(Article, backref=backref('articletags'))
             tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
             tag = relationship('Tag')
-            # extra_info = Column(Unicode)
+            # TODO this dummy column is required to create an API for this
+            # object.
+            id = Column(Integer)
 
         class Tag(self.Base):
             __tablename__ = 'tag'

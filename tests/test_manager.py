@@ -32,6 +32,7 @@ from .helpers import DatabaseTestBase
 from .helpers import ManagerTestBase
 from .helpers import FlaskTestBase
 from .helpers import force_json_contenttype
+from .helpers import skip
 from .helpers import skip_unless
 from .helpers import unregister_fsa_session_signals
 
@@ -136,14 +137,24 @@ class TestLocalAPIManager(DatabaseTestBase):
         methods created with the API manager.
 
         """
-        counter1 = 0
-        counter2 = 0
+        class Counter:
+            """An object that increments a counter on each invocation."""
 
-        def increment1(**kw):
-            counter1 += 1
+            def __init__(self):
+                self._counter = 0
 
-        def increment2(**kw):
-            counter2 += 1
+            def __call__(self, *args, **kw):
+                self._counter += 1
+
+            def __eq__(self, other):
+                if isinstance(other, Counter):
+                    return self._counter == other._counter
+                if isinstance(other, int):
+                    return self._counter == other
+                return False
+
+        increment1 = Counter()
+        increment2 = Counter()
 
         preprocessors = dict(GET_COLLECTION=[increment1])
         postprocessors = dict(GET_COLLECTION=[increment2])
@@ -152,10 +163,12 @@ class TestLocalAPIManager(DatabaseTestBase):
                              postprocessors=postprocessors)
         manager.create_api(self.Person)
         manager.create_api(self.Article)
+        # After each request, regardless of API endpoint, both counters should
+        # be incremented.
         self.app.get('/api/person')
-        self.app.get('/api/computer')
+        self.app.get('/api/article')
         self.app.get('/api/person')
-        assert counter1 == counter2 == 3
+        assert increment1 == increment2 == 3
 
 
 class TestAPIManager(ManagerTestBase):
@@ -189,7 +202,7 @@ class TestAPIManager(ManagerTestBase):
         """Tests the global :func:`flask.ext.restless.url_for` function."""
         self.manager.create_api(self.Person, collection_name='people')
         self.manager.create_api(self.Article, collection_name='articles')
-        with self.flaskapp.app_context():
+        with self.flaskapp.test_request_context():
             url1 = url_for(self.Person)
             url2 = url_for(self.Person, instid=1)
             url3 = url_for(self.Person, instid=1, relationname='articles')
@@ -244,14 +257,14 @@ class TestAPIManager(ManagerTestBase):
         response = self.app.get('/api/eval/person')
         assert response.status_code == 404
 
+    @skip('This test does not make sense anymore with JSON API')
     @raises(IllegalArgumentError)
     def test_exclude_primary_key_column(self):
         """Tests that trying to create a writable API while excluding the
         primary key field raises an error.
 
         """
-        self.manager.create_api(self.Person, exclude_columns=['id'],
-                                methods=['POST'])
+        self.manager.create_api(self.Person, exclude=['id'], methods=['POST'])
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')

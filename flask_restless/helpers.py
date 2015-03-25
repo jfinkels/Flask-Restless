@@ -515,33 +515,6 @@ def changes_on_update(model):
                for column in sqlalchemy_inspect(model).columns)
 
 
-def get_column_name(self, column):
-    """Retrieve a column name from a column attribute of SQLAlchemy model
-    class, or a string.
-
-    Raises `TypeError` when argument does not fall into either of those
-    options.
-
-    Raises `ValueError` if argument is a column attribute that belongs to an
-    incorrect model class.
-
-    """
-    if hasattr(column, '__clause_element__'):
-        clause_element = column.__clause_element__()
-        if not isinstance(clause_element, Column):
-            msg = ('Column must be a string or a column attribute'
-                   ' of SQLAlchemy ORM class')
-            raise TypeError(msg)
-        model = column.class_
-        if model is not self.model:
-            msg = ('Cannot specify column of model {0} while creating API'
-                   ' for model {1}').format(model.__name__,
-                                            self.model.__name__)
-            raise ValueError(msg)
-        return clause_element.key
-    return column
-
-
 # This code comes from <http://stackoverflow.com/a/6798042/108197>, which is
 # licensed under the Creative Commons Attribution-ShareAlike License version
 # 3.0 Unported.
