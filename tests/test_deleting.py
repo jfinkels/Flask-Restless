@@ -21,8 +21,10 @@ except ImportError:
 else:
     has_flask_sqlalchemy = True
 from sqlalchemy import Column
+from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy import Unicode
+from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
@@ -51,13 +53,37 @@ class TestDeleting(ManagerTestBase):
         """
         super(TestDeleting, self).setUp()
 
+        class Article(self.Base):
+            __tablename__ = 'article'
+            id = Column(Integer, primary_key=True)
+            author = relationship('Person')
+            author_id = Column(Integer, ForeignKey('person.id'))
+
         class Person(self.Base):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
 
+        self.Article = Article
         self.Person = Person
         self.Base.metadata.create_all()
+        self.manager.create_api(Article, methods=['DELETE'])
         self.manager.create_api(Person, methods=['DELETE'])
+
+    def test_related_resource_url_forbidden(self):
+        """Tests that :http:method:`delete` requests to a related resource URL
+        are forbidden.
+
+        """
+        article = self.Article(id=1)
+        person = self.Person(id=1)
+        article.author = person
+        self.session.add_all([article, person])
+        self.session.commit()
+        data = dict(data=dict(type='person', id=1))
+        response = self.app.delete('/api/article/1/author', data=dumps(data))
+        assert response.status_code == 403
+        # TODO check error message here
+        assert article.author is person
 
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`201` if the

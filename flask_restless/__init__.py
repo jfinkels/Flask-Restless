@@ -25,5 +25,6 @@ from .helpers import model_for
 from .helpers import url_for
 from .manager import APIManager
 from .manager import IllegalArgumentError
+from .serialization import simple_serialize
 from .views import CONTENT_TYPE
 from .views import ProcessingException

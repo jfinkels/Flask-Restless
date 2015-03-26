@@ -67,6 +67,12 @@ class TestUpdating(ManagerTestBase):
         """
         super(TestUpdating, self).setUp()
 
+        class Article(self.Base):
+            __tablename__ = 'article'
+            id = Column(Integer, primary_key=True)
+            author = relationship('Person')
+            author_id = Column(Integer, ForeignKey('person.id'))
+
         class Person(self.Base):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
@@ -100,11 +106,28 @@ class TestUpdating(ManagerTestBase):
             def radius(cls):
                 return cls.length / 2
 
-        self.Person = Person
+        self.Article = Article
         self.Interval = Interval
+        self.Person = Person
         self.Base.metadata.create_all()
+        self.manager.create_api(Article, methods=['PUT'])
         self.manager.create_api(Interval, methods=['PUT'])
         self.manager.create_api(Person, methods=['PUT'])
+
+    def test_related_resource_url_forbidden(self):
+        """Tests that :http:method:`put` requests to a related resource URL
+        are forbidden.
+
+        """
+        article = self.Article(id=1)
+        person = self.Person(id=1)
+        self.session.add_all([article, person])
+        self.session.commit()
+        data = dict(data=dict(type='person', id=1))
+        response = self.app.put('/api/article/1/author', data=dumps(data))
+        assert response.status_code == 403
+        # TODO check error message here
+        assert article.author == None
 
     def test_deserializing_time(self):
         """Test for deserializing a JSON representation of a time field."""

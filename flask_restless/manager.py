@@ -28,6 +28,7 @@ from .helpers import model_for
 from .helpers import url_for
 from .serialization import DefaultSerializer
 from .serialization import DefaultDeserializer
+from .serialization import ValidationError
 from .views import API
 from .views import FunctionAPI
 from .views import RelationshipAPI
@@ -634,8 +635,6 @@ class APIManager(object):
         #no_instance_methods = methods & frozenset(('POST', ))
         instance_methods = \
             methods & frozenset(('GET', 'PATCH', 'DELETE', 'PUT'))
-        # the base URL of the endpoints on which requests will be made
-        collection_endpoint = '/{0}'.format(collection_name)
         # the name of the API, for use in creating the view and the blueprint
         apiname = APIManager.api_name(collection_name)
         # Prepend the universal preprocessors and postprocessors specified in
@@ -653,23 +652,29 @@ class APIManager(object):
         if serializer is None:
             serializer = DefaultSerializer(only, exclude,
                                            additional_attributes)
+            if validation_exceptions is None:
+                validation_exceptions = [ValidationError]
+            else:
+                validation_exceptions.append(ValidationError)
         if deserializer is None:
             deserializer = DefaultDeserializer(restlessinfo.session, model)
-        # the view function for the API for this model
+        # Create the view function for the API for this model.
+        atmr = allow_to_many_replacement
+        acgi = allow_client_generated_ids
         api_view = API.as_view(apiname, restlessinfo.session, model,
                                # Keyword arguments for APIBase.__init__()
                                preprocessors=preprocessors_,
                                postprocessors=postprocessors_,
                                primary_key=primary_key,
                                validation_exceptions=validation_exceptions,
-                               allow_to_many_replacement=allow_to_many_replacement,
+                               allow_to_many_replacement=atmr,
                                # Keyword arguments for API.__init__()
                                page_size=page_size,
                                max_page_size=max_page_size,
                                serializer=serializer,
                                deserializer=deserializer,
                                includes=includes,
-                               allow_client_generated_ids=allow_client_generated_ids,
+                               allow_client_generated_ids=acgi,
                                allow_delete_many=allow_delete_many)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = APIManager._next_blueprint_name(app.blueprints,
@@ -681,42 +686,26 @@ class APIManager(object):
         # TODO what should the second argument here be?
         # TODO should the url_prefix be specified here or in register_blueprint
         blueprint = Blueprint(blueprintname, __name__, url_prefix=url_prefix)
-        # For example, /api/person.
-        # blueprint.add_url_rule(collection_endpoint,
-        #                        methods=['GET', 'POST'], view_func=api_view)
-        # For example, /api/person/1.
-        blueprint.add_url_rule(collection_endpoint,
-                               defaults={'instid': None, 'relationname': None,
-                                         'relationinstid': None},
-                               methods=frozenset(['GET', 'POST', 'DELETE']) & methods,
-                               view_func=api_view)
-        # the per-instance endpoints will allow both integer and string primary
-        # key accesses
-        instance_endpoint = '{0}/<instid>'.format(collection_endpoint)
-        # For example, /api/person/1.
-        blueprint.add_url_rule(instance_endpoint, methods=instance_methods,
-                               defaults={'relationname': None,
-                                         'relationinstid': None},
-                               view_func=api_view)
-        # Create related resource URLs.
-        relation_endpoint = \
-            '{0}/<relationname>'.format(instance_endpoint)
-        relation_instance_endpoint = \
-            '{0}/<relationinstid>'.format(relation_endpoint)
-        # For example, /api/person/1/computers.
-        blueprint.add_url_rule(relation_endpoint,
-                               methods=frozenset(['GET', 'PUT', 'POST',
-                                                  'DELETE']) & methods,
-                               defaults={'relationinstid': None},
-                               view_func=api_view)
-        # For example, /api/person/1/computers/2.
-        blueprint.add_url_rule(relation_instance_endpoint,
-                               methods=instance_methods,
-                               view_func=api_view)
+        add_rule = blueprint.add_url_rule
+
+        # The URLs that will be routed below.
+        collection_url = '/{0}'.format(collection_name)
+        resource_url = '{0}/<instid>'.format(collection_url)
+        related_resource_url = '{0}/<relationname>'.format(resource_url)
+        to_many_resource_url = \
+            '{0}/<relationinstid>'.format(related_resource_url)
+        relationship_url = '{0}/links/<relationname>'.format(resource_url)
 
         # Create relationship URL endpoints.
+        #
+        # Due to a limitation in Flask's routing (which is actually Werkzeug's
+        # routing), this needs to be declared *before* the rest of the API
+        # views. Otherwise, requests like :http:get:`/articles/1/links/author`
+        # interpret the word `links` as the name of a relation of an article
+        # object.
         RAPI = RelationshipAPI
         relationship_api_name = '{0}.links'.format(apiname)
+        adftmr = allow_delete_from_to_many_relationships
         relationship_api_view = \
             RAPI.as_view(relationship_api_name,
                          restlessinfo.session, model,
@@ -727,22 +716,57 @@ class APIManager(object):
                          validation_exceptions=validation_exceptions,
                          allow_to_many_replacement=allow_to_many_replacement,
                          # Keyword arguments RelationshipAPI.__init__()
-                         allow_delete_from_to_many_relationships=allow_delete_from_to_many_relationships)
-        relationship_endpoint = '{0}/links/<relationname>'.format(instance_endpoint)
-        blueprint.add_url_rule(relationship_endpoint,
-                               methods=frozenset(['PUT', 'POST', 'DELETE']) & methods,
-                               view_func=relationship_api_view)
+                         allow_delete_from_to_many_relationships=adftmr)
+        relationship_methods = frozenset(('PUT', 'POST', 'DELETE')) & methods
+        add_rule(relationship_url, methods=relationship_methods,
+                 view_func=relationship_api_view)
+
+        # The URL for accessing the entire collection.
+        #
+        # For example, /api/people.
+        collection_methods = frozenset(('GET', 'POST')) & methods
+        collection_defaults = dict(instid=None, relationname=None,
+                                   relationinstid=None)
+        add_rule(collection_url, view_func=api_view,
+                 methods=collection_methods, defaults=collection_defaults)
+
+        # The URL for accessing a single resource.
+        #
+        # For example, /api/people/1.
+        resource_methods = frozenset(('GET', 'PUT', 'DELETE')) & methods
+        resource_defaults = dict(relationname=None, relationinstid=None)
+        add_rule(resource_url, view_func=api_view, methods=resource_methods,
+                 defaults=resource_defaults)
+
+        # The URL for accessing a related resource, which may be a to-many or a
+        # to-one relationship.
+        #
+        # For example, /api/people/1/articles.
+        related_resource_methods = frozenset(('GET')) & methods
+        related_resource_defaults = dict(relationinstid=None)
+        add_rule(related_resource_url, view_func=api_view,
+                 methods=related_resource_methods,
+                 defaults=related_resource_defaults)
+
+        # The URL for accessing a to-many related resource.
+        #
+        # For example, /api/people/1/articles/1.
+        to_many_resource_methods = frozenset(('GET')) & methods
+        add_rule(to_many_resource_url, view_func=api_view,
+                 methods=to_many_resource_methods)
 
         # if function evaluation is allowed, add an endpoint at /api/eval/...
         # which responds only to GET requests and responds with the result of
         # evaluating functions on all instances of the specified model
         if allow_functions:
-            eval_api_name = apiname + 'eval'
+            eval_api_name = '{0}.eval'.format(apiname)
             eval_api_view = FunctionAPI.as_view(eval_api_name,
                                                 restlessinfo.session, model)
-            eval_endpoint = '/eval' + collection_endpoint
-            blueprint.add_url_rule(eval_endpoint, methods=['GET'],
+            eval_endpoint = '/eval{0}'.format(collection_url)
+            eval_methods = ['GET']
+            blueprint.add_url_rule(eval_endpoint, methods=eval_methods,
                                    view_func=eval_api_view)
+
         # Finally, record that this APIManager instance has created an API for
         # the specified model.
         self.created_apis_for[model] = APIInfo(collection_name, blueprint.name)

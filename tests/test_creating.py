@@ -43,7 +43,7 @@ from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
-from flask.ext.restless.serialization import DefaultSerializer
+from flask.ext.restless import simple_serialize
 
 from .helpers import dumps
 from .helpers import DatabaseTestBase
@@ -107,6 +107,21 @@ class TestCreating(ManagerTestBase):
         self.manager.create_api(Person, methods=['POST'])
         self.manager.create_api(Article, methods=['POST'])
         self.manager.create_api(Tag, methods=['POST'])
+
+    def test_related_resource_url_forbidden(self):
+        """Tests that :http:method:`post` requests to a related resource URL
+        are forbidden.
+
+        """
+        person = self.Person(id=1)
+        article = self.Article(id=1)
+        self.session.add_all([person, article])
+        self.session.commit()
+        data = dict(data=dict(type='article', id=1))
+        response = self.app.post('/api/person/1/articles', data=dumps(data))
+        assert response.status_code == 403
+        # TODO check error message here
+        assert person.articles == []
 
     def test_deserializing_time(self):
         """Test for deserializing a JSON representation of a time field."""
@@ -456,10 +471,9 @@ class TestCreating(ManagerTestBase):
     def test_custom_serialization(self):
         """Tests for custom deserialization."""
         temp = []
-        defaultserializer = DefaultSerializer()
 
         def serializer(instance):
-            result = defaultserializer(instance)
+            result = simple_serialize(instance)
             result['foo'] = temp.pop()
             return result
 
@@ -479,6 +493,23 @@ class TestCreating(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         assert person['foo'] == 'bar'
+
+    def test_deserialization_exception(self):
+        """Tests that exceptions are caught when a custom deserialization
+        method raises an exception.
+
+        """
+
+        def deserializer(*args, **kw):
+            raise Exception
+
+        self.manager.create_api(self.Person, methods=['POST'],
+                                url_prefix='/api2',
+                                deserializer=deserializer)
+        data = dict(data=dict(type='person'))
+        response = self.app.post('/api2/person', data=dumps(data))
+        assert response.status_code == 400
+        # TODO check error message here
 
 
 class TestProcessors(ManagerTestBase):

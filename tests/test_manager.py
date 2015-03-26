@@ -25,8 +25,10 @@ from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
-from flask.ext.restless import url_for
+from flask.ext.restless import collection_name
 from flask.ext.restless import IllegalArgumentError
+from flask.ext.restless import model_for
+from flask.ext.restless import url_for
 
 from .helpers import DatabaseTestBase
 from .helpers import ManagerTestBase

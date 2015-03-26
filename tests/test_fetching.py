@@ -38,7 +38,7 @@ from sqlalchemy.orm import relationship
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
 from flask.ext.restless import ProcessingException
-from flask.ext.restless.serialization import DefaultSerializer
+from flask.ext.restless import simple_serialize
 
 from .helpers import DatabaseTestBase
 from .helpers import dumps
@@ -368,10 +368,9 @@ class TestFetching(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        defaultserializer = DefaultSerializer()
 
         def serializer(instance, only=None):
-            result = defaultserializer(instance)
+            result = simple_serialize(instance)
             result['foo'] = 'bar'
             return result
 
@@ -381,6 +380,24 @@ class TestFetching(ManagerTestBase):
         document = loads(response.data)
         person = document['data']
         assert person['foo'] == 'bar'
+
+    def test_serialization_exception(self):
+        """Tests that exceptions are caught when a custom serialization method
+        raises an exception.
+
+        """
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        def serializer(*args, **kw):
+            raise Exception
+
+        self.manager.create_api(self.Person, serializer=serializer,
+                                url_prefix='/api2')
+        response = self.app.get('/api2/person/1')
+        assert response.status_code == 400
+        # TODO check error message
 
 
 class TestServerSparseFieldsets(ManagerTestBase):
@@ -921,6 +938,7 @@ class TestDynamicRelationships(ManagerTestBase):
         self.session.add_all([person, article1, article2])
         self.session.commit()
         response = self.app.get('/api/person/1/links/articles')
+        print(response)
         document = loads(response.data)
         articles = document['data']
         assert ['1', '2'] == sorted(article['id'] for article in articles)

@@ -1136,7 +1136,12 @@ class API(APIBase):
         if relationname is None:
             # Determine the fields to include for this object.
             fields_for_this = fields.get(self.collection_name)
-            result = self.serialize(instance, only=fields_for_this)
+            try:
+                result = self.serialize(instance, only=fields_for_this)
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to deserialize object'
+                return error_response(400, detail=detail)
         else:
             related_value = getattr(instance, relationname)
             # create a placeholder for the relations of the returned models
@@ -1150,8 +1155,13 @@ class API(APIBase):
                     detail = ('No relation exists with name'
                               ' "{0}"').format(relationname)
                     return error_response(404, detail=detail)
-                result = self.serialize(related_value_instance,
-                                        only=fields_for_this)
+                try:
+                    result = self.serialize(related_value_instance,
+                                            only=fields_for_this)
+                except Exception as exception:
+                    current_app.logger.exception(str(exception))
+                    detail = 'Failed to deserialize object'
+                    return error_response(400, detail=detail)
             else:
                 # for security purposes, don't transmit list as top-level JSON
                 if is_like_list(instance, relationname):
@@ -1160,11 +1170,21 @@ class API(APIBase):
                     #
                     #     result = self._paginated(list(related_value), deep)
                     #
-                    result = [self.serialize(inst, only=fields_for_this)
-                              for inst in related_value]
+                    try:
+                        result = [self.serialize(inst, only=fields_for_this)
+                                  for inst in related_value]
+                    except Exception as exception:
+                        current_app.logger.exception(str(exception))
+                        detail = 'Failed to deserialize object'
+                        return error_response(400, detail=detail)
                 else:
-                    result = self.serialize(related_value,
-                                            only=fields_for_this)
+                    try:
+                        result = self.serialize(related_value,
+                                                only=fields_for_this)
+                    except Exception as exception:
+                        current_app.logger.exception(str(exception))
+                        detail = 'Failed to deserialize object'
+                        return error_response(400, detail=detail)
         # if result is None:
         #     return error_response(404)
 
@@ -1178,8 +1198,14 @@ class API(APIBase):
                                         link_id) for link_id in linkids)
             # Determine which fields to include in the linked objects.
             fields_for_this = fields.get(link)
-            result['included'].extend(self.serialize(x, only=fields_for_this)
-                                      for x in related_instances)
+            try:
+                included = (self.serialize(instance, only=fields_for_this)
+                            for instance in related_instances)
+                result['included'].extend(included)
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to deserialize object'
+                return error_response(400, detail=detail)
         for postprocessor in self.postprocessors['GET_RESOURCE']:
             postprocessor(result=result)
         return result, 200
@@ -1267,14 +1293,14 @@ class API(APIBase):
         """
         if instid is None:
             return self._search()
-        # HACK-ish: If we don't do this, Flask gets confused and routes GET
-        # requests of the form `/api/computers/1/links/owner` here. This is
-        # because the RelationshipAPI class doesn't allow GET methods.
+        # HACK A GET request to a relationship URL, like
+        # `/articles/1/links/author` gets routed here because the
+        # RelationshipAPI does not have a get() method (since the other methods
+        # behave a bit differently; they don't require serialization, for
+        # example).
         if relationname == 'links':
-            detail = ('This server does not allow GET requests to relationship'
-                      ' URLs; maybe you meant to send a request to the related'
-                      ' resource URL instead?')
-            return error_response(403, detail=detail)
+            relationname = relationinstid
+            relationinstid = None
         return self._get_single(instid, relationname, relationinstid)
 
     def _delete_many(self):
@@ -1355,6 +1381,13 @@ class API(APIBase):
            Added the `relationname` keyword argument.
 
         """
+        # Check if this is an attempt to DELETE from a related resource URL.
+        if (instid is not None and relationname is not None
+            and relationinstid is None):
+            detail = ('Cannot DELETE from a related resource URL; perhaps you'
+                      ' meant to DELETE from {0}/{1}/links/{2}')
+            detail = detail.format(self.collection_name, instid, relationname)
+            return error_response(403, detail=detail)
         # If no instance ID is provided, this request is an attempt to delete
         # many instances of the model, possibly filtered.
         if instid is None:
@@ -1476,127 +1509,154 @@ class API(APIBase):
         single level of relationship data.
 
         """
+        # Check if this is an attempt to POST to a related resource URL.
+        if (instid is not None and relationname is not None
+            and relationinstid is None):
+            detail = ('Cannot POST to a related resource URL; perhaps you'
+                      ' meant to POST to {0}/{1}/links/{2}')
+            detail = detail.format(self.collection_name, instid, relationname)
+            return error_response(403, detail=detail)
         # try to read the parameters for the model from the body of the request
         try:
             data = json.loads(request.get_data()) or {}
         except (BadRequest, TypeError, ValueError, OverflowError) as exception:
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-
         # apply any preprocessors to the POST arguments
         for preprocessor in self.preprocessors['POST']:
             preprocessor(data=data)
-
-        # Check if this is a request to update a relation.
-        if (instid is not None and relationname is not None
-            and relationinstid is None):
-            # Get the instance on which to set the relationship info.
-            instance = get_by(self.session, self.model, instid)
-            # If no such relation exists, return an error to the client.
-            if not hasattr(instance, relationname):
-                detail = 'No such link: {0}'.format(relationname)
-                return error_response(404, detail=detail)
-            related_model = get_related_model(self.model, relationname)
-            relation = getattr(instance, relationname)
-            # If it is -to-many relation, add to the existing list.
-            if is_like_list(instance, relationname):
-                related_id = data.pop(relationname)
-                if isinstance(related_id, list):
-                    related_instances = [get_by(self.session, related_model,
-                                                d) for d in related_id]
-                else:
-                    related_instances = [get_by(self.session, related_model,
-                                                related_id)]
-                relation.extend(related_instances)
-            # Otherwise it is a -to-one relation.
-            else:
-                # If there is already something there, return an error.
-                if relation is not None:
-                    detail = ('Cannot POST to a -to-one relationship that'
-                              ' already has a linked instance (with ID'
-                              ' {0})').format(relationinstid)
-                    return error_response(400, detail=detail)
-                # Get the ID of the related model to which to set the link.
-                #
-                # TODO I don't know the collection name for the linked objects,
-                # so I can't provide a correctly named mapping here.
-                #
-                # related_id = data[collection_name(related_model)]
-                related_id = data.popitem()[1]
-                related_instance = get_by(self.session, related_model,
-                                          related_id)
-                try:
-                    setattr(instance, relationname, related_instance)
-                except self.validation_exceptions as exception:
-                    current_app.logger.exception(str(exception))
-                    return self._handle_validation_exception(exception)
-            result = {}
-            status = 204
-            headers = {}
-        else:
-            if 'data' not in data:
-                detail = 'Resource must have a "data" key'
-                return error_response(400, detail=detail)
-            data = data['data']
-            has_many = isinstance(data, list)
+            # # Get the instance on which to set the relationship info.
+            # instance = get_by(self.session, self.model, instid)
+            # # If no such relation exists, return an error to the client.
+            # if not hasattr(instance, relationname):
+            #     detail = 'No such link: {0}'.format(relationname)
+            #     return error_response(404, detail=detail)
+            # related_model = get_related_model(self.model, relationname)
+            # relation = getattr(instance, relationname)
+            # # If it is -to-many relation, add to the existing list.
+            # if is_like_list(instance, relationname):
+            #     related_id = data.pop(relationname)
+            #     if isinstance(related_id, list):
+            #         related_instances = [get_by(self.session, related_model,
+            #                                     d) for d in related_id]
+            #     else:
+            #         related_instances = [get_by(self.session, related_model,
+            #                                     related_id)]
+            #     relation.extend(related_instances)
+            # # Otherwise it is a -to-one relation.
+            # else:
+            #     # If there is already something there, return an error.
+            #     if relation is not None:
+            #         detail = ('Cannot POST to a -to-one relationship that'
+            #                   ' already has a linked instance (with ID'
+            #                   ' {0})').format(relationinstid)
+            #         return error_response(400, detail=detail)
+            #     # Get the ID of the related model to which to set the link.
+            #     #
+            #     # TODO I don't know the collection name for the linked objects,
+            #     # so I can't provide a correctly named mapping here.
+            #     #
+            #     # related_id = data[collection_name(related_model)]
+            #     related_id = data.popitem()[1]
+            #     related_instance = get_by(self.session, related_model,
+            #                               related_id)
+            #     try:
+            #         setattr(instance, relationname, related_instance)
+            #     except self.validation_exceptions as exception:
+            #         current_app.logger.exception(str(exception))
+            #         return self._handle_validation_exception(exception)
+            # result = {}
+            # status = 204
+            # headers = {}
+        # else:
+        if 'data' not in data:
+            detail = 'Resource must have a "data" key'
+            return error_response(400, detail=detail)
+        data = data['data']
+        has_many = isinstance(data, list)
+        # Convert the dictionary representation into an instance of the
+        # model.
+        if has_many:
+            # Deserialize each of the models; convert from JSON into
+            # instances of a SQLAlchemy model.
             try:
-                # Convert the dictionary representation into an instance of the
-                # model.
-                if has_many:
-                    instances = [self.deserialize(obj) for obj in data]
-                    # Add the created model to the session.
-                    self.session.add_all(instances)
-                else:
-                    if 'type' not in data:
-                        detail = 'Must specify correct data type'
-                        return error_response(400, detail=detail)
-                    if 'id' in data and not self.allow_client_generated_ids:
-                        detail = 'Server does not allow client-generated IDS'
-                        return error_response(403, detail=detail)
-                    type_ = data.pop('type')
-                    if type_ != self.collection_name:
-                        message = ('Type must be {0}, not'
-                                   ' {1}').format(self.collection_name, type_)
-                        return error_response(409, detail=message)
-                    instance = self.deserialize(data)
-                    self.session.add(instance)
-                self.session.commit()
-                # Get the dictionary representation of the new instance as it
-                # appears in the database.
-                if has_many:
-                    result = [self.serialize(inst) for inst in instances]
-                else:
-                    result = self.serialize(instance)
+                instances = [self.deserialize(obj) for obj in data]
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to deserialize object'
+                return error_response(400, detail=detail)
+            # Add the created model to the session.
+            try:
+                self.session.add_all(instances)
             except self.validation_exceptions as exception:
                 return self._handle_validation_exception(exception)
-            # Determine the value of the primary key for this instance and
-            # encode URL-encode it (in case it is a Unicode string).
-            if has_many:
-                primary_keys = [primary_key_value(inst, as_string=True)
-                                for inst in instances]
-            else:
-                primary_key = primary_key_value(instance, as_string=True)
-            # The URL at which a client can access the newly created instance
-            # of the model.
-            if has_many:
-                urls = ['{0}/{1}'.format(request.base_url, k)
-                        for k in primary_keys]
-            else:
-                url = '{0}/{1}'.format(request.base_url, primary_key)
-            # Provide that URL in the Location header in the response.
-            #
-            # TODO should the many Location header fields be combined into a
-            # single comma-separated header field::
-            #
-            #     headers = dict(Location=', '.join(urls))
-            #
-            if has_many:
-                headers = (('Location', url) for url in urls)
-            else:
-                headers = dict(Location=url)
-            # Wrap the resulting object or list of objects under a 'data' key.
-            result = dict(data=result)
-            status = 201
+        else:
+            if 'type' not in data:
+                detail = 'Must specify correct data type'
+                return error_response(400, detail=detail)
+            if 'id' in data and not self.allow_client_generated_ids:
+                detail = 'Server does not allow client-generated IDS'
+                return error_response(403, detail=detail)
+            type_ = data.pop('type')
+            if type_ != self.collection_name:
+                message = ('Type must be {0}, not'
+                           ' {1}').format(self.collection_name, type_)
+                return error_response(409, detail=message)
+            try:
+                instance = self.deserialize(data)
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to deserialize object'
+                return error_response(400, detail=detail)
+            try:
+                self.session.add(instance)
+            except self.validation_exceptions as exception:
+                return self._handle_validation_exception(exception)
+        self.session.commit()
+        # Get the dictionary representation of the new instance as it
+        # appears in the database.
+        if has_many:
+            try:
+                result = [self.serialize(inst) for inst in instances]
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to serialize object'
+                return error_response(400, detail=detail)
+        else:
+            try:
+                result = self.serialize(instance)
+            except Exception as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to serialize object'
+                return error_response(400, detail=detail)
+        # Determine the value of the primary key for this instance and
+        # encode URL-encode it (in case it is a Unicode string).
+        if has_many:
+            primary_keys = [primary_key_value(inst, as_string=True)
+                            for inst in instances]
+        else:
+            primary_key = primary_key_value(instance, as_string=True)
+        # The URL at which a client can access the newly created instance
+        # of the model.
+        if has_many:
+            urls = ['{0}/{1}'.format(request.base_url, k)
+                    for k in primary_keys]
+        else:
+            url = '{0}/{1}'.format(request.base_url, primary_key)
+        # Provide that URL in the Location header in the response.
+        #
+        # TODO should the many Location header fields be combined into a
+        # single comma-separated header field::
+        #
+        #     headers = dict(Location=', '.join(urls))
+        #
+        if has_many:
+            headers = (('Location', url) for url in urls)
+        else:
+            headers = dict(Location=url)
+        # Wrap the resulting object or list of objects under a 'data' key.
+        result = dict(data=result)
+        status = 201
         for postprocessor in self.postprocessors['POST']:
             postprocessor(result=result)
         return result, status, headers
@@ -1717,6 +1777,13 @@ class API(APIBase):
            Added the `relationname` keyword argument.
 
         """
+        # Check if this is an attempt to PUT to a related resource URL.
+        if (instid is not None and relationname is not None
+            and relationinstid is None):
+            detail = ('Cannot PUT to a related resource URL; perhaps you'
+                      ' meant to PUT to {0}/{1}/links/{2}')
+            detail = detail.format(self.collection_name, instid, relationname)
+            return error_response(403, detail=detail)
         # try to load the fields/values to update from the body of the request
         try:
             data = json.loads(request.get_data()) or {}
