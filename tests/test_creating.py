@@ -43,6 +43,7 @@ from sqlalchemy.orm import relationship
 
 from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
+from flask.ext.restless import DeserializationException
 from flask.ext.restless import simple_serialize
 
 from .helpers import dumps
@@ -501,7 +502,7 @@ class TestCreating(ManagerTestBase):
         """
 
         def deserializer(*args, **kw):
-            raise Exception
+            raise DeserializationException
 
         self.manager.create_api(self.Person, methods=['POST'],
                                 url_prefix='/api2',

@@ -28,7 +28,8 @@ from .helpers import model_for
 from .helpers import url_for
 from .serialization import DefaultSerializer
 from .serialization import DefaultDeserializer
-from .serialization import ValidationError
+from .serialization import DeserializationException
+from .serialization import SerializationException
 from .views import API
 from .views import FunctionAPI
 from .views import RelationshipAPI
@@ -651,9 +652,9 @@ class APIManager(object):
             serializer = DefaultSerializer(only, exclude,
                                            additional_attributes)
             if validation_exceptions is None:
-                validation_exceptions = [ValidationError]
+                validation_exceptions = [DeserializationException]
             else:
-                validation_exceptions.append(ValidationError)
+                validation_exceptions.append(DeserializationException)
         if deserializer is None:
             deserializer = DefaultDeserializer(restlessinfo.session, model)
         # Create the view function for the API for this model.

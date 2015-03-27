@@ -69,7 +69,8 @@ from .helpers import url_for
 # from .search import create_query
 from .search import ComparisonToNull
 from .search import search
-from .serialization import ValidationError
+from .serialization import DeserializationException
+from .serialization import SerializationException
 
 
 #: Format string for creating the complete URL for a paginated response.
@@ -444,7 +445,7 @@ def extract_error_messages(exception):
 
     """
     # Check for our own built-in validation error.
-    if isinstance(exception, ValidationError):
+    if isinstance(exception, DeserializationException):
         return exception.args[0]
     # 'errors' comes from sqlalchemy_elixir_validations
     if hasattr(exception, 'errors'):
@@ -1138,7 +1139,7 @@ class API(APIBase):
             fields_for_this = fields.get(self.collection_name)
             try:
                 result = self.serialize(instance, only=fields_for_this)
-            except Exception as exception:
+            except SerializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
@@ -1157,7 +1158,7 @@ class API(APIBase):
                 try:
                     result = self.serialize(related_value_instance,
                                             only=fields_for_this)
-                except Exception as exception:
+                except SerializationException as exception:
                     current_app.logger.exception(str(exception))
                     detail = 'Failed to deserialize object'
                     return error_response(400, detail=detail)
@@ -1172,7 +1173,7 @@ class API(APIBase):
                     try:
                         result = [self.serialize(inst, only=fields_for_this)
                                   for inst in related_value]
-                    except Exception as exception:
+                    except SerializationException as exception:
                         current_app.logger.exception(str(exception))
                         detail = 'Failed to deserialize object'
                         return error_response(400, detail=detail)
@@ -1180,7 +1181,7 @@ class API(APIBase):
                     try:
                         result = self.serialize(related_value,
                                                 only=fields_for_this)
-                    except Exception as exception:
+                    except SerializationException as exception:
                         current_app.logger.exception(str(exception))
                         detail = 'Failed to deserialize object'
                         return error_response(400, detail=detail)
@@ -1200,11 +1201,11 @@ class API(APIBase):
             try:
                 included = (self.serialize(instance, only=fields_for_this)
                             for instance in related_instances)
-                result['included'].extend(included)
-            except Exception as exception:
+            except DeserializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
+            result['included'].extend(included)
         for postprocessor in self.postprocessors['GET_RESOURCE']:
             postprocessor(result=result)
         return result, 200
@@ -1580,7 +1581,7 @@ class API(APIBase):
             # instances of a SQLAlchemy model.
             try:
                 instances = [self.deserialize(obj) for obj in data]
-            except Exception as exception:
+            except DeserializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
@@ -1604,27 +1605,28 @@ class API(APIBase):
                 return error_response(409, detail=message)
             try:
                 instance = self.deserialize(data)
+            except DeserializationException as exception:
+                current_app.logger.exception(str(exception))
+                detail = 'Failed to deserialize object'
+                return error_response(400, detail=detail)
+            try:
                 self.session.add(instance)
                 self.session.commit()
             except self.validation_exceptions as exception:
                 return self._handle_validation_exception(exception)
-            except Exception as exception:
-                current_app.logger.exception(str(exception))
-                detail = 'Failed to deserialize object'
-                return error_response(400, detail=detail)
         # Get the dictionary representation of the new instance as it
         # appears in the database.
         if has_many:
             try:
                 result = [self.serialize(inst) for inst in instances]
-            except Exception as exception:
+            except SerializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to serialize object'
                 return error_response(400, detail=detail)
         else:
             try:
                 result = self.serialize(instance)
-            except Exception as exception:
+            except SerializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to serialize object'
                 return error_response(400, detail=detail)

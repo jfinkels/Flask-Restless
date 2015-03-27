@@ -31,8 +31,16 @@ from .helpers import url_for
 COLUMN_BLACKLIST = ('_sa_polymorphic_on', )
 
 
-class ValidationError(Exception):
-    """Raised when there is a problem deserializing a dictionary into an
+class SerializationException(Exception):
+    """Raised when there is a problem serializing an instance of a SQLAlchemy
+    model to a dictionary representation.
+
+    """
+    pass
+
+
+class DeserializationException(Exception):
+    """Raised when there is a problem deserializing a Python dictionary to an
     instance of a SQLAlchemy model.
 
     """
@@ -282,10 +290,10 @@ class DefaultDeserializer(Deserializer):
                     if not has_field(self.model, relation):
                         msg = ('Model does not have relationship'
                                ' "{0}"').format(relation)
-                        raise ValidationError(msg)
+                        raise DeserializationException(msg)
             elif not has_field(self.model, field):
                 msg = "Model does not have field '{0}'".format(field)
-                raise ValidationError(msg)
+                raise DeserializationException(msg)
         # Determine which related instances need to be added.
         links = {}
         if 'links' in data:

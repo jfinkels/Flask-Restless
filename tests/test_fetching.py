@@ -39,6 +39,7 @@ from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
 from flask.ext.restless import ProcessingException
 from flask.ext.restless import simple_serialize
+from flask.ext.restless import SerializationException
 
 from .helpers import DatabaseTestBase
 from .helpers import dumps
@@ -391,7 +392,7 @@ class TestFetching(ManagerTestBase):
         self.session.commit()
 
         def serializer(*args, **kw):
-            raise Exception
+            raise SerializationException
 
         self.manager.create_api(self.Person, serializer=serializer,
                                 url_prefix='/api2')
