@@ -11,6 +11,10 @@
     :license: GNU AGPLv3+ or BSD
 
 """
+from sqlalchemy import Column
+from sqlalchemy import Integer
+
+from .helpers import ManagerTestBase
 
 
 class TestCreating(ManagerTestBase):
