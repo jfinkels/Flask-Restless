@@ -1079,7 +1079,7 @@ class TestAssociationProxy(ManagerTestBase):
                 }
         response = self.app.put('/api2/article/1', data=dumps(data))
         assert response.status_code == 204
-        assert set(article.tags) == {tag1, tag2}
+        assert set(article.tags) == set((tag1, tag2))
 
     def test_scalar(self):
         """Tests for updating an association proxy to scalars as a list

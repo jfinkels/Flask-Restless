@@ -220,8 +220,14 @@ class APIManager(object):
 
         """
         # Reverse the dictionary.
-        models = {info.collection_name: model
-                  for model, info in self.created_apis_for.items()}
+        #
+        # In Python 3 this should be:
+        #
+        #     models = {info.collection_name: model
+        #               for model, info in self.created_apis_for.items()}
+        #
+        models = dict((info.collection_name: model)
+                      for model, info in self.created_apis_for.items())
         try:
             return models[collection_name]
         except KeyError:

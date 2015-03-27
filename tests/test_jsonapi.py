@@ -145,7 +145,7 @@ class TestDocumentStructure(ManagerTestBase):
         """
         response = self.app.get('/api/person')
         document = loads(response.data)
-        allowed = {'data', 'errors', 'links', 'included', 'meta'}
+        allowed = ('data', 'errors', 'links', 'included', 'meta')
         alphanumeric = string.ascii_letters + string.digits
         assert all(d in allowed or d[0] not in alphanumeric for d in document)
 
@@ -318,8 +318,8 @@ class TestDocumentStructure(ManagerTestBase):
         """
         response = self.app.get('/api/person')
         document = loads(response.data)
-        allowed = {'self', 'resource', 'type', 'id', 'meta', 'first', 'last',
-                   'next', 'prev'}
+        allowed = ('self', 'resource', 'type', 'id', 'meta', 'first', 'last',
+                   'next', 'prev')
         alphanumeric = string.ascii_letters + string.digits
         for link_name, link_object in document['links'].items():
             if link_name not in ('first', 'last', 'next', 'prev', 'self'):
