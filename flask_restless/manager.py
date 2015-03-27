@@ -36,6 +36,8 @@ from .views import RelationshipAPI
 #: The set of methods which are allowed by default when creating an API
 READONLY_METHODS = frozenset(('GET', ))
 
+#: The set of all recognized HTTP methods.
+ALL_METHODS = frozenset(('GET', 'PUT', 'POST', 'DELETE'))
 
 #: A triple that stores the SQLAlchemy session and the universal pre- and post-
 #: processors to be applied to any API created for a particular Flask
@@ -631,10 +633,6 @@ class APIManager(object):
             collection_name = model.__tablename__
         # convert all method names to upper case
         methods = frozenset((m.upper() for m in methods))
-        # sets of methods used for different types of endpoints
-        #no_instance_methods = methods & frozenset(('POST', ))
-        instance_methods = \
-            methods & frozenset(('GET', 'PATCH', 'DELETE', 'PUT'))
         # the name of the API, for use in creating the view and the blueprint
         apiname = APIManager.api_name(collection_name)
         # Prepend the universal preprocessors and postprocessors specified in
@@ -703,21 +701,20 @@ class APIManager(object):
         # views. Otherwise, requests like :http:get:`/articles/1/links/author`
         # interpret the word `links` as the name of a relation of an article
         # object.
-        RAPI = RelationshipAPI
         relationship_api_name = '{0}.links'.format(apiname)
+        rapi_view = RelationshipAPI.as_view
         adftmr = allow_delete_from_to_many_relationships
         relationship_api_view = \
-            RAPI.as_view(relationship_api_name,
-                         restlessinfo.session, model,
-                         # Keyword arguments for APIBase.__init__()
-                         preprocessors=preprocessors_,
-                         postprocessors=postprocessors_,
-                         primary_key=primary_key,
-                         validation_exceptions=validation_exceptions,
-                         allow_to_many_replacement=allow_to_many_replacement,
-                         # Keyword arguments RelationshipAPI.__init__()
-                         allow_delete_from_to_many_relationships=adftmr)
-        relationship_methods = frozenset(('PUT', 'POST', 'DELETE')) & methods
+            rapi_view(relationship_api_name, restlessinfo.session, model,
+                      # Keyword arguments for APIBase.__init__()
+                      preprocessors=preprocessors_,
+                      postprocessors=postprocessors_,
+                      primary_key=primary_key,
+                      validation_exceptions=validation_exceptions,
+                      allow_to_many_replacement=allow_to_many_replacement,
+                      # Keyword arguments RelationshipAPI.__init__()
+                      allow_delete_from_to_many_relationships=adftmr)
+        relationship_methods = ALL_METHODS & methods
         add_rule(relationship_url, methods=relationship_methods,
                  view_func=relationship_api_view)
 
@@ -742,7 +739,7 @@ class APIManager(object):
         # to-one relationship.
         #
         # For example, /api/people/1/articles.
-        related_resource_methods = frozenset(('GET')) & methods
+        related_resource_methods = READONLY_METHODS & methods
         related_resource_defaults = dict(relationinstid=None)
         add_rule(related_resource_url, view_func=api_view,
                  methods=related_resource_methods,

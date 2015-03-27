@@ -37,6 +37,7 @@ from .helpers import FlaskTestBase
 from .helpers import ManagerTestBase
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
+from .helpers import skip
 from .helpers import skip_unless
 from .helpers import unregister_fsa_session_signals
 
@@ -81,7 +82,7 @@ class TestDeleting(ManagerTestBase):
         self.session.commit()
         data = dict(data=dict(type='person', id=1))
         response = self.app.delete('/api/article/1/author', data=dumps(data))
-        assert response.status_code == 403
+        assert response.status_code == 405
         # TODO check error message here
         assert article.author is person
 
@@ -170,13 +171,9 @@ class TestDeleting(ManagerTestBase):
         response = self.app.delete('/api/person')
         assert response.status_code == 405
 
+    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_collection(self):
-        """Tests for deleting all instances of a collection.
-
-        Deleting an entire collection is not discussed in the JSON API
-        specification.
-
-        """
+        """Tests for deleting all instances of a collection."""
         self.session.add_all(self.Person() for n in range(3))
         self.session.commit()
         self.manager.create_api(self.Person, methods=['DELETE'],
@@ -187,6 +184,7 @@ class TestDeleting(ManagerTestBase):
         assert document['meta']['total'] == 3
         assert self.session.query(self.Person).count() == 0
 
+    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_empty_collection(self):
         """Tests that deleting an empty collection still yields a
         :http:status:`200` response.
@@ -199,13 +197,9 @@ class TestDeleting(ManagerTestBase):
         document = loads(response.data)
         assert document['meta']['total'] == 0
 
+    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_filtered_collection(self):
-        """Tests for deleting instances of a collection selected by filters.
-
-        Deleting from a collection is not discussed in the JSON API
-        specification.
-
-        """
+        """Tests for deleting instances of a collection selected by filters."""
         person1 = self.Person(id=1)
         person2 = self.Person(id=2)
         person3 = self.Person(id=3)
@@ -339,6 +333,7 @@ class TestProcessors(ManagerTestBase):
         # Ensure that the person has not been deleted.
         assert self.session.query(self.Person).first() == person
 
+    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_collection_preprocessor(self):
         """Tests for a preprocessor on a request to delete a collection."""
         person1 = self.Person(id=1)

@@ -125,7 +125,7 @@ class TestUpdating(ManagerTestBase):
         self.session.commit()
         data = dict(data=dict(type='person', id=1))
         response = self.app.put('/api/article/1/author', data=dumps(data))
-        assert response.status_code == 403
+        assert response.status_code == 405
         # TODO check error message here
         assert article.author == None
 

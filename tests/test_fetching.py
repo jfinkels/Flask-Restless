@@ -915,11 +915,11 @@ class TestDynamicRelationships(ManagerTestBase):
         person = self.Person(id=1)
         article1 = self.Article(id=1)
         article2 = self.Article(id=2)
-        article1.author = person
-        article2.author = person
+        person.articles = [article1, article2]
         self.session.add_all([person, article1, article2])
         self.session.commit()
         response = self.app.get('/api/person/1/articles')
+        assert response.status_code == 200
         document = loads(response.data)
         articles = document['data']
         assert ['1', '2'] == sorted(article['id'] for article in articles)
@@ -933,12 +933,11 @@ class TestDynamicRelationships(ManagerTestBase):
         person = self.Person(id=1)
         article1 = self.Article(id=1)
         article2 = self.Article(id=2)
-        article1.author = person
-        article2.author = person
+        person.articles = [article1, article2]
         self.session.add_all([person, article1, article2])
         self.session.commit()
         response = self.app.get('/api/person/1/links/articles')
-        print(response)
+        assert response.status_code == 200
         document = loads(response.data)
         articles = document['data']
         assert ['1', '2'] == sorted(article['id'] for article in articles)

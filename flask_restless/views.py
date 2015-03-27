@@ -1144,7 +1144,6 @@ class API(APIBase):
                 return error_response(400, detail=detail)
         else:
             related_value = getattr(instance, relationname)
-            # create a placeholder for the relations of the returned models
             related_model = get_related_model(self.model, relationname)
             # Determine fields to include for this model.
             fields_for_this = fields.get(collection_name(related_model))
@@ -1604,14 +1603,13 @@ class API(APIBase):
                 return error_response(409, detail=message)
             try:
                 instance = self.deserialize(data)
+                self.session.add(instance)
+            except self.validation_exceptions as exception:
+                return self._handle_validation_exception(exception)
             except Exception as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
-            try:
-                self.session.add(instance)
-            except self.validation_exceptions as exception:
-                return self._handle_validation_exception(exception)
         self.session.commit()
         # Get the dictionary representation of the new instance as it
         # appears in the database.
@@ -1882,12 +1880,61 @@ class API(APIBase):
 
 
 class RelationshipAPI(APIBase):
+    # Responds to requests of the form `/people/1/links/articles` and
+    # `/articles/1/links/author` with link objects (*not* resource objects).
 
     def __init__(self, session, model,
                  allow_delete_from_to_many_relationships=False, *args, **kw):
         super(RelationshipAPI, self).__init__(session, model, *args, **kw)
         self.allow_delete_from_to_many_relationships = \
             allow_delete_from_to_many_relationships
+
+    def get(self, instid, relationname):
+        for preprocessor in self.preprocessors['GET_RELATIONSHIP']:
+            temp_result = preprocessor(instance_id=instid,
+                                       relationship=relationname)
+            # Let the return value of the preprocessor be the new value of
+            # instid, thereby allowing the preprocessor to effectively specify
+            # which instance of the model to process on.
+            #
+            # We assume that if the preprocessor returns None, it really just
+            # didn't return anything, which means we shouldn't overwrite the
+            # instid.
+            if temp_result is not None:
+                instid = temp_result
+        # get the instance of the "main" model whose ID is instid
+        instance = get_by(self.session, self.model, instid, self.primary_key)
+        if instance is None:
+            detail = 'No instance with ID {0}'.format(instid)
+            return error_response(404, detail=detail)
+        # If no relation is requested, raise a 404.
+        if relationname is None:
+            detail = 'Must specify a relationship name.'
+            return error_response(404, detail=detail)
+        related_value = getattr(instance, relationname)
+        related_model = get_related_model(self.model, relationname)
+        related_type = collection_name(related_model)
+        # For the sake of brevity, rename this function.
+        pk = primary_key_value
+        # If this is a to-many relationship...
+        if is_like_list(instance, relationname):
+            # Convert IDs to strings, as required by JSON API.
+            #
+            # TODO This could be paginated.
+            result = [dict(id=str(pk(instance)), type=related_type)
+                      for instance in related_value]
+        # If this is a to-one relationship...
+        else:
+            if related_value is None:
+                result = None
+            else:
+                # Convert ID to string, as required by JSON API.
+                result = dict(id=str(pk(related_value)), type=related_type)
+        # Wrap the result
+        result = dict(data=result)
+        for postprocessor in self.postprocessors['GET_RELATIONSHIP']:
+            postprocessor(result=result)
+        return result, 200
 
     def post(self, instid, relationname):
         # try to load the fields/values to update from the body of the request
@@ -1897,7 +1944,7 @@ class RelationshipAPI(APIBase):
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-        for preprocessor in self.preprocessors['POST']:
+        for preprocessor in self.preprocessors['POST_RELATIONSHIP']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname, data=data)
             # See the note under the preprocessor in the get() method.
@@ -1952,7 +1999,7 @@ class RelationshipAPI(APIBase):
         #     self.session.commit()
         #
         # Perform any necessary postprocessing.
-        for postprocessor in self.postprocessors['POST']:
+        for postprocessor in self.postprocessors['POST_RELATIONSHIP']:
             postprocessor()
         return {}, 204
 
@@ -1964,7 +2011,7 @@ class RelationshipAPI(APIBase):
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-        for preprocessor in self.preprocessors['PUT_RESOURCE']:
+        for preprocessor in self.preprocessors['PUT_RELATIONSHIP']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname, data=data)
             # See the note under the preprocessor in the get() method.
@@ -2064,7 +2111,7 @@ class RelationshipAPI(APIBase):
         #     self.session.commit()
         #
         # Perform any necessary postprocessing.
-        for postprocessor in self.postprocessors['PUT']:
+        for postprocessor in self.postprocessors['PUT_RELATIONSHIP']:
             postprocessor()
         return {}, 204
 
@@ -2080,7 +2127,7 @@ class RelationshipAPI(APIBase):
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
         was_deleted = False
-        for preprocessor in self.preprocessors['DELETE']:
+        for preprocessor in self.preprocessors['DELETE_RELATIONSHIP']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname)
             # See the note under the preprocessor in the get() method.
@@ -2112,7 +2159,7 @@ class RelationshipAPI(APIBase):
                 pass
         was_deleted = len(self.session.dirty) > 0
         self.session.commit()
-        for postprocessor in self.postprocessors['DELETE']:
+        for postprocessor in self.postprocessors['DELETE_RELATIONSHIP']:
             postprocessor(was_deleted=was_deleted)
         if not was_deleted:
             detail = 'There was no instance to delete'

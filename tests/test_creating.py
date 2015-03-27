@@ -119,7 +119,7 @@ class TestCreating(ManagerTestBase):
         self.session.commit()
         data = dict(data=dict(type='article', id=1))
         response = self.app.post('/api/person/1/articles', data=dumps(data))
-        assert response.status_code == 403
+        assert response.status_code == 405
         # TODO check error message here
         assert person.articles == []
 

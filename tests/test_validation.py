@@ -94,7 +94,6 @@ class TestSimpleValidation(ManagerTestBase):
         document = loads(response.data)
         errors = document['errors']
         error = errors[0]
-        print(error)
         assert 'validation' in error['title'].lower()
         assert 'must be between' in error['detail'].lower()
         # Check that the person was not created.
