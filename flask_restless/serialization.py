@@ -57,13 +57,13 @@ def get_column_name(column):
     return column
 
 
-class Serializer:
+class Serializer(object):
 
     def __call__(self, instance, only=None):
         raise NotImplemented
 
 
-class Deserializer:
+class Deserializer(object):
 
     def __init__(self, session, model):
         self.session = session

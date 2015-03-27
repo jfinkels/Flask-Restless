@@ -1587,6 +1587,7 @@ class API(APIBase):
             # Add the created model to the session.
             try:
                 self.session.add_all(instances)
+                self.session.commit()
             except self.validation_exceptions as exception:
                 return self._handle_validation_exception(exception)
         else:
@@ -1604,13 +1605,13 @@ class API(APIBase):
             try:
                 instance = self.deserialize(data)
                 self.session.add(instance)
+                self.session.commit()
             except self.validation_exceptions as exception:
                 return self._handle_validation_exception(exception)
             except Exception as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
-        self.session.commit()
         # Get the dictionary representation of the new instance as it
         # appears in the database.
         if has_many:

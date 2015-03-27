@@ -13,7 +13,10 @@
 
 """
 import string
-from urllib.parse import urlparse
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
 import uuid
 
 from sqlalchemy import Column
