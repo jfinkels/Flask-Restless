@@ -69,10 +69,13 @@ class TestFetching(ManagerTestBase):
             __tablename__ = 'article'
             id = Column(Integer, primary_key=True)
             title = Column(Unicode, primary_key=True)
+            author_id = Column(Integer, ForeignKey('person.id'))
+            author = relationship('Person')
 
         class Person(self.Base):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
             bedtime = Column(Time)
             birth_datetime = Column(DateTime)
             birthday = Column(Date)
@@ -315,21 +318,6 @@ class TestFetching(ManagerTestBase):
         person = document['data']
         assert not person['has_early_bedtime']
 
-    # TODO does this even make sense?
-    def test_group_by(self):
-        """Tests for grouping a collection of resources according to a field.
-
-        """
-        article1 = self.Article(id=1, title='foo')
-        article2 = self.Article(id=2, title='bar')
-        article3 = self.Article(id=3, title='foo')
-        self.session.add_all([article1, article2, article3])
-        self.session.commit()
-        response = self.app.get('/api/article?sort=-id&group=title')
-        document = loads(response.data)
-        articles = document['data']
-        assert False, 'Not implemented'
-
     def test_collection_name_single(self):
         """Tests for fetching a single resource with an alternate collection
         name.
@@ -399,6 +387,37 @@ class TestFetching(ManagerTestBase):
         response = self.app.get('/api2/person/1')
         assert response.status_code == 400
         # TODO check error message
+
+    def test_group_by(self):
+        """Tests for grouping results."""
+        person1 = self.Person(id=1, name='foo')
+        person2 = self.Person(id=2, name='foo')
+        person3 = self.Person(id=3, name='bar')
+        self.session.add_all([person1, person2, person3])
+        self.session.commit()
+        response = self.app.get('/api/person?group=name')
+        document = loads(response.data)
+        people = document['data']
+        assert ['bar', 'foo'] == sorted(person['name'] for person in people)
+
+    def test_group_by_related(self):
+        """Tests for grouping results by a field on a related model."""
+        person1 = self.Person(id=1, name='foo')
+        person2 = self.Person(id=2, name='bar')
+        article1 = self.Article(id=1, title='')
+        article2 = self.Article(id=2, title='')
+        article3 = self.Article(id=3, title='')
+        article1.author = person1
+        article2.author = person1
+        article3.author = person2
+        self.session.add_all([person1, person2, article1, article2, article3])
+        self.session.commit()
+        response = self.app.get('/api/article?group=author.name')
+        document = loads(response.data)
+        articles = document['data']
+        author_ids = sorted(article['links']['author']['linkage']['id']
+                            for article in articles)
+        assert ['1', '2'] == author_ids
 
 
 class TestServerSparseFieldsets(ManagerTestBase):

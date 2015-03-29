@@ -456,7 +456,7 @@ class QueryBuilder(object):
         return or_(create_filt(model, f) for f in filt)
 
     @staticmethod
-    def create_query(session, model, filters=None, sort=None,
+    def create_query(session, model, filters=None, sort=None, group_by=None,
                      _ignore_order_by=False):
         """Builds an SQLAlchemy query instance based on the search parameters
         present in ``search_params``, an instance of :class:`SearchParameters`.
@@ -517,11 +517,18 @@ class QueryBuilder(object):
                 pk_order = (getattr(model, field).asc() for field in pks)
                 query = query.order_by(*pk_order)
 
-        # # Group the query.
-        # if search_params.group_by:
-        #     for groupby in search_params.group_by:
-        #         field = getattr(model, groupby.field)
-        #         query = query.group_by(field)
+        # Group the query.
+        if group_by:
+            for field_name in group_by:
+                if '.' in field_name:
+                    field_name, field_name_in_relation = field_name.split('.')
+                    relation_model = get_related_model(model, field_name)
+                    field = getattr(relation_model, field_name_in_relation)
+                    query = query.join(relation_model)
+                    query = query.group_by(field)
+                else:
+                    field = getattr(model, field_name)
+                    query = query.group_by(field)
 
         # # Apply limit and offset to the query.
         # if search_params.limit:
@@ -559,8 +566,8 @@ class QueryBuilder(object):
 #     return QueryBuilder.create_query(session, model, sort, _ignore_order_by)
 
 
-def search(session, model, filters=None, sort=None, single=False,
-           _ignore_order_by=False):
+def search(session, model, filters=None, sort=None, group_by=None,
+           single=False, _ignore_order_by=False):
     """Performs the search specified by the given parameters on the model
     specified in the constructor of this class.
 
@@ -600,7 +607,7 @@ def search(session, model, filters=None, sort=None, single=False,
     # # corresponding value is anything except those values which evaluate to
     # # False (False, 0, the empty string, the empty list, etc.).
     # is_single = search_params.get('single')
-    query = QueryBuilder.create_query(session, model, filters, sort,
+    query = QueryBuilder.create_query(session, model, filters, sort, group_by,
                                       _ignore_order_by)
     if single:
         # may raise NoResultFound or MultipleResultsFound

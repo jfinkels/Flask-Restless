@@ -226,7 +226,7 @@ class APIManager(object):
         #     models = {info.collection_name: model
         #               for model, info in self.created_apis_for.items()}
         #
-        models = dict((info.collection_name: model)
+        models = dict((info.collection_name, model)
                       for model, info in self.created_apis_for.items())
         try:
             return models[collection_name]

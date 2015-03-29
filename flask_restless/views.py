@@ -957,6 +957,13 @@ class API(APIBase):
             detail = 'Each sort parameter must begin with "+" or "-".'
             return error_response(400, detail=detail)
 
+        # Determine grouping options.
+        group_by = request.args.get('group')
+        if group_by:
+            group_by = group_by.split(',')
+        else:
+            group_by = []
+
         # Determine whether the client expects a single resource response.
         try:
             single = bool(int(request.args.get('filter[single]', 0)))
@@ -970,8 +977,8 @@ class API(APIBase):
 
         # Compute the result of the search on the model.
         try:
-            result = search(self.session, self.model,
-                            filters=filters, sort=sort, single=single)
+            result = search(self.session, self.model, filters=filters,
+                            sort=sort, group_by=group_by, single=single)
         except NoResultFound:
             return error_response(404, detail='No result found')
         except MultipleResultsFound:
