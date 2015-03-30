@@ -54,6 +54,7 @@ from .helpers import collection_name
 from .helpers import count
 from .helpers import evaluate_functions
 from .helpers import get_by
+from .helpers import get_model
 from .helpers import get_related_model
 from .helpers import has_field
 from .helpers import is_like_list
@@ -1137,97 +1138,147 @@ class API(APIBase):
         if instance is None:
             message = 'No instance with ID {0}'.format(instid)
             return error_response(404, detail=message)
+        is_collection = False
+        primary_model = self.model
+
+        # Get related instance instances as a primary resource or collection,
+        # if requested.
+        if relationname is not None:
+            primary_model = get_related_model(instance, relationname)
+            if primary_model is None:
+                detail = 'No such relation: {0}'.format(primary_model)
+                return error_response(404, detail=detail)
+            if is_like_list(instance, relationname):
+                instances = getattr(instance, relationname)
+                is_collection = True
+                if relationinstid is not None:
+                    if not any(primary_key_value(instance) == relationinstid
+                               for instance in instances):
+                        detail = ('No related instance with ID'
+                                  ' {0}').format(relationinstid)
+                        return error_response(404, detail=detail)
+                    instance = get_by(self.session, primary_model,
+                                      relationinstid)
+                    is_collection = False
+            else:
+                instance = getattr(instance, relationname)
+                if relationinstid is not None:
+                    detail = 'Cannot specify ID for a to-one relationship'
+                    return error_response(400, detail=detail)
+
+        # Get instances to include.
+        if is_collection:
+            to_include = set(chain(self.instances_to_include(instance)
+                                   for instance in instances))
+        else:
+            to_include = self.instances_to_include(instance)
+
         # Get the fields to include for each type of object.
         fields = parse_sparse_fields()
-        # If no relation is requested, just return the instance. Otherwise,
-        # get the value of the relation specified by `relationname`.
-        if relationname is None:
-            # Determine the fields to include for this object.
-            fields_for_this = fields.get(self.collection_name)
+
+        # Serialize the primary resource or collection or resources.
+        fields_for_primary = fields.get(collection_name(primary_model))
+        try:
+            if is_collection:
+                result = [self.serialize(instance, only=fields_for_primary)
+                          for instance in instances]
+            else:
+                result = self.serialize(instance, only=fields_for_primary)
+        except SerializationException as exception:
+            current_app.logger.exception(str(exception))
+            detail = 'Failed to deserialize object'
+            return error_response(400, detail=detail)
+
+        # Wrap the primary resource or collection of resources in the `data`
+        # key.
+        result = dict(data=result)
+
+        # Include any requested resources in a compound document.
+        included = []
+        for included_instance in to_include:
+            included_model = get_model(included_instance)
+            fields_for_this = fields.get(collection_name(included_model))
             try:
-                result = self.serialize(instance, only=fields_for_this)
+                serialized = self.serialize(included_instance,
+                                            only=fields_for_this)
             except SerializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
-        else:
-            related_value = getattr(instance, relationname)
-            related_model = get_related_model(self.model, relationname)
-            # Determine fields to include for this model.
-            fields_for_this = fields.get(collection_name(related_model))
-            if relationinstid is not None:
-                related_value_instance = get_by(self.session, related_model,
-                                                relationinstid)
-                if related_value_instance is None:
-                    detail = ('No relation exists with name'
-                              ' "{0}"').format(relationname)
-                    return error_response(404, detail=detail)
-                try:
-                    result = self.serialize(related_value_instance,
-                                            only=fields_for_this)
-                except SerializationException as exception:
-                    current_app.logger.exception(str(exception))
-                    detail = 'Failed to deserialize object'
-                    return error_response(400, detail=detail)
-            else:
-                # for security purposes, don't transmit list as top-level JSON
-                if is_like_list(instance, relationname):
-                    # TODO Disabled pagination for now in order to ease
-                    # transition into JSON API compliance.
-                    #
-                    #     result = self._paginated(list(related_value), deep)
-                    #
-                    try:
-                        result = [self.serialize(inst, only=fields_for_this)
-                                  for inst in related_value]
-                    except SerializationException as exception:
-                        current_app.logger.exception(str(exception))
-                        detail = 'Failed to deserialize object'
-                        return error_response(400, detail=detail)
-                else:
-                    try:
-                        result = self.serialize(related_value,
-                                                only=fields_for_this)
-                    except SerializationException as exception:
-                        current_app.logger.exception(str(exception))
-                        detail = 'Failed to deserialize object'
-                        return error_response(400, detail=detail)
+            included.append(serialized)
+        if included:
+            result['included'] = included
+
+        # # If no relation is requested, just return the instance. Otherwise,
+        # # get the value of the relation specified by `relationname`.
+        # if relationname is None:
+        #     # Determine the fields to include for this object.
+        #     fields_for_this = fields.get(self.collection_name)
+        #     try:
+        #         result = self.serialize(instance, only=fields_for_this)
+        #     except SerializationException as exception:
+        #         current_app.logger.exception(str(exception))
+        #         detail = 'Failed to deserialize object'
+        #         return error_response(400, detail=detail)
+        # else:
+        #     related_value = getattr(instance, relationname)
+        #     related_model = get_related_model(self.model, relationname)
+        #     # Determine fields to include for this model.
+        #     fields_for_this = fields.get(collection_name(related_model))
+        #     if relationinstid is not None:
+        #         related_value_instance = get_by(self.session, related_model,
+        #                                         relationinstid)
+        #         if related_value_instance is None:
+        #             detail = ('No relation exists with name'
+        #                       ' "{0}"').format(relationname)
+        #             return error_response(404, detail=detail)
+        #         try:
+        #             result = self.serialize(related_value_instance,
+        #                                     only=fields_for_this)
+        #         except SerializationException as exception:
+        #             current_app.logger.exception(str(exception))
+        #             detail = 'Failed to deserialize object'
+        #             return error_response(400, detail=detail)
+        #     else:
+        #         # for security purposes, don't transmit list as top-level JSON
+        #         if is_like_list(instance, relationname):
+        #             # TODO Disabled pagination for now in order to ease
+        #             # transition into JSON API compliance.
+        #             #
+        #             #     result = self._paginated(list(related_value), deep)
+        #             #
+        #             try:
+        #                 result = [self.serialize(inst, only=fields_for_this)
+        #                           for inst in related_value]
+        #             except SerializationException as exception:
+        #                 current_app.logger.exception(str(exception))
+        #                 detail = 'Failed to deserialize object'
+        #                 return error_response(400, detail=detail)
+        #         else:
+        #             try:
+        #                 result = self.serialize(related_value,
+        #                                         only=fields_for_this)
+        #             except SerializationException as exception:
+        #                 current_app.logger.exception(str(exception))
+        #                 detail = 'Failed to deserialize object'
+        #                 return error_response(400, detail=detail)
         # if result is None:
         #     return error_response(404)
 
-        # Wrap the result
-        result = dict(data=result)
-        # Add any links requested to be included by URL parameters.
-        ids_to_link = self.links_to_add(result)
-        for link, linkids in ids_to_link.items():
-            related_model = model_for(link)
-            related_instances = (get_by(self.session, related_model,
-                                        link_id) for link_id in linkids)
-            # Determine which fields to include in the linked objects.
-            fields_for_this = fields.get(link)
-            try:
-                included = (self.serialize(instance, only=fields_for_this)
-                            for instance in related_instances)
-            except DeserializationException as exception:
-                current_app.logger.exception(str(exception))
-                detail = 'Failed to deserialize object'
-                return error_response(400, detail=detail)
-            result['included'].extend(included)
         for postprocessor in self.postprocessors['GET_RESOURCE']:
             postprocessor(result=result)
         return result, 200
 
-    def links_to_add(self, result):
-        # Store the original data in a variable for easier access.
-        original = result['data']
-        if isinstance(original, list):
-            has_links = any('links' in resource for resource in original)
-        else:
-            # If the original data is an empty to-one relation, it could be
-            # None.
-            has_links = original is not None and 'links' in original
-        if not has_links:
-            return {}
+    def instances_to_include(self, instance):
+        # if isinstance(original, list):
+        #     has_links = any('links' in resource for resource in original)
+        # else:
+        #     # If the original data is an empty to-one relation, it could be
+        #     # None.
+        #     has_links = original is not None and 'links' in original
+        # if not has_links:
+        #     return {}
+
         # Add any links requested to be included by URL parameters.
         #
         # We expect `toinclude` to be a comma-separated list of relationship
@@ -1237,52 +1288,72 @@ class API(APIBase):
             return {}
         elif toinclude is None and self.default_includes is not None:
             toinclude = self.default_includes
-        elif toinclude is not None and self.default_includes is None:
+        else:
             toinclude = set(toinclude.split(','))
-        else:  # toinclude is not None and self.default_includes is not None:
-            toinclude = set(toinclude.split(',')) | self.default_includes
-        ids_to_link = defaultdict(set)
-        result['included'] = []
+
         # TODO we should reverse the nested-ness of these for loops:
         # toinclude is likely to be a small list, and `original` could be a
         # very large list, so the latter should be the outer loop.
+        result = set()
         for link in toinclude:
-            # TODO deal with dot-separated lists.
-            #
-            # If there is a list of instances, collect all the linked IDs
-            # of the appropriate type.
-            if isinstance(original, list):
-                for resource in original:
-                    # If the resource has a link with the name specified in
-                    # `toinclude`, then get the type and IDs of that link.
-                    if link in resource['links']:
-                        link_data = resource['links'][link]['linkage']
-                        if isinstance(link_data, list):
-                            for link_object in link_data:
-                                link_type = link_object['type']
-                                link_id = link_object['id']
-                                ids_to_link[link_type].add(link_id)
-                        else:
-                            link_type = link_data['type']
-                            link_id = link_data['id']
-                            ids_to_link[link_type].add(link_id)
-            # Otherwise, if there is just a single instance, look through
-            # the links to get the IDs of the linked instances.
+            if '.' in link:
+                path = link.split('.')
             else:
-                # If the resource has a link with the name specified in
-                # `toinclude`, then get the type and IDs of that link.
-                if link in original['links']:
-                    link_data = original['links'][link]['linkage']
-                    if isinstance(link_data, list):
-                        for link_object in link_data:
-                            link_type = link_object['type']
-                            link_id = link_object['id']
-                            ids_to_link[link_type].add(link_id)
-                    else:
-                        link_type = link_data['type']
-                        link_id = link_data['id']
-                        ids_to_link[link_type].add(link_id)
-        return ids_to_link
+                path = [link]
+            instances = {instance}
+            for relation in path:
+                if is_like_list(instance, relation):
+                    instances = set(chain(getattr(instance, relation)
+                                          for instance in instances))
+                else:
+                    instances = set(getattr(instance, relation)
+                                    for instance in instances)
+            result |= set(instances)
+            # else:
+            #     if is_like_list(instance, relation):
+            #         result |= set(chain(getattr(instance, relation)
+            #                             for instance in instances))
+            #     else:
+            #         result |= set(getattr(instance, relation)
+            #                       for instance in instances)
+            # # If the primary data is a resource and not a collection, turn it
+            # # into a list anyway.
+            # if not isinstance(original, list):
+            #     original = [original]
+            # for resource in original:
+            #     # If the resource has a link with the name specified in
+            #     # `toinclude`, then get the type and IDs of that link.
+            #     if link in resource['links']:
+            #         link_data = resource['links'][link]['linkage']
+            #         # If the link is a to-one relation, turn it into a list
+            #         # anyway.
+            #         if not isinstance(link_data, list):
+            #             link_data = [link_data]
+            #         for link_object in link_data:
+            #             link_type = link_object['type']
+            #             link_id = link_object['id']
+            #             ids_to_link[link_type].add(link_id)
+            #         # else:
+            #         #     link_type = link_data['type']
+            #         #     link_id = link_data['id']
+            #         #     ids_to_link[link_type].add(link_id)
+            # # Otherwise, if there is just a single instance, look through
+            # # the links to get the IDs of the linked instances.
+            # else:
+            #     # If the resource has a link with the name specified in
+            #     # `toinclude`, then get the type and IDs of that link.
+            #     if link in original['links']:
+            #         link_data = original['links'][link]['linkage']
+            #         if isinstance(link_data, list):
+            #             for link_object in link_data:
+            #                 link_type = link_object['type']
+            #                 link_id = link_object['id']
+            #                 ids_to_link[link_type].add(link_id)
+            #         else:
+            #             link_type = link_data['type']
+            #             link_id = link_data['id']
+            #             ids_to_link[link_type].add(link_id)
+        return result
 
     def get(self, instid, relationname, relationinstid):
         """Returns a JSON representation of an instance of model with the

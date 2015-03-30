@@ -14,11 +14,15 @@ try:
 except ImportError:
     from urllib import quote as url_quote
 from datetime import date
+from datetime import datetime
+from datetime import time
 
 from sqlalchemy import Column
 from sqlalchemy import Date
+from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
+from sqlalchemy import Time
 from sqlalchemy import Unicode
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import backref
@@ -31,6 +35,10 @@ from .helpers import ManagerTestBase
 
 
 class SearchTestBase(ManagerTestBase):
+    """Provides a search method that simplifies a fetch request with filtering
+    query parameters.
+
+    """
 
     def search(self, url, filters=None, single=None):
         """Convenience function for performing a filtered :http:method:`get`
@@ -75,23 +83,35 @@ class TestFiltering(SearchTestBase):
         """
         super(TestFiltering, self).setUp()
 
+        class Article(self.Base):
+            __tablename__ = 'article'
+            id = Column(Integer, primary_key=True)
+            author_id = Column(Integer, ForeignKey('person.id'))
+            author = relationship('Person', backref=backref('articles'))
+
         class Person(self.Base):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
             name = Column(Unicode)
             age = Column(Integer)
             birthday = Column(Date)
+            birth_datetime = Column(DateTime)
+            bedtime = Column(Time)
 
         class Comment(self.Base):
             __tablename__ = 'comment'
             id = Column(Integer, primary_key=True)
             content = Column(Unicode)
+            article_id = Column(Integer, ForeignKey('article.id'))
+            article = relationship(Article, backref=backref('comments'))
             author_id = Column(Integer, ForeignKey('person.id'))
-            author = relationship('Person', backref=backref('comments'))
+            author = relationship(Person, backref=backref('comments'))
 
+        self.Article = Article
         self.Person = Person
         self.Comment = Comment
         self.Base.metadata.create_all()
+        self.manager.create_api(Article)
         self.manager.create_api(Person)
         # HACK Need to create APIs for these other models because otherwise
         # we're not able to create the link URLs to them.
@@ -240,21 +260,90 @@ class TestFiltering(SearchTestBase):
         """Tests for nesting a ``has`` filter beneath another ``has`` filter.
 
         """
-        assert False, 'Not implemented'
+        for i in range(5):
+            person = self.Person(id=i)
+            article = self.Article(id=i)
+            comment = self.Comment(id=i)
+            article.author = person
+            comment.author = person
+            comment.article = article
+            self.session.add_all([article, person, comment])
+        self.session.commit()
+        # Search for any comments whose articles have authors with id < 3.
+        id_filter = dict(name='id', op='lt', val=3)
+        author_filter = dict(name='author', op='has', val=id_filter)
+        article_filter = dict(name='article', op='has', val=author_filter)
+        filters = [article_filter]
+        response = self.search('/api/comment', filters)
+        document = loads(response.data)
+        comments = document['data']
+        assert ['0', '1', '2'] == sorted(comment['id'] for comment in comments)
 
     def test_any_with_any(self):
         """Tests for nesting an ``any`` filter beneath another ``any`` filter.
 
         """
-        assert False, 'Not implemented'
+        for i in range(5):
+            person = self.Person(id=i)
+            article = self.Article(id=i)
+            comment = self.Comment(id=i)
+            article.author = person
+            comment.author = person
+            comment.article = article
+            self.session.add_all([article, person, comment])
+        self.session.commit()
+        # Search for any people whose articles have any comment with id < 3.
+        id_filter = dict(name='id', op='lt', val=3)
+        comments_filter = dict(name='comments', op='any', val=id_filter)
+        articles_filter = dict(name='articles', op='any', val=comments_filter)
+        filters = [articles_filter]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['0', '1', '2'] == sorted(person['id'] for person in people)
 
     def test_has_with_any(self):
         """Tests for nesting a ``has`` filter beneath an ``any`` filter."""
-        assert False, 'Not implemented'
+        for i in range(5):
+            person = self.Person(id=i)
+            article = self.Article(id=i)
+            comment = self.Comment(id=i)
+            article.author = person
+            comment.author = person
+            comment.article = article
+            self.session.add_all([article, person, comment])
+        self.session.commit()
+        # Search for any articles with comments whose author has id < 3.
+        id_filter = dict(name='id', op='lt', val=3)
+        author_filter = dict(name='author', op='has', val=id_filter)
+        comments_filter = dict(name='comments', op='any', val=author_filter)
+        filters = [comments_filter]
+        response = self.search('/api/article', filters)
+        document = loads(response.data)
+        articles = document['data']
+        assert ['0', '1', '2'] == sorted(article['id'] for article in articles)
 
     def test_any_with_has(self):
         """Tests for nesting an ``any`` filter beneath a ``has`` filter."""
-        assert False, 'Not implemented'
+        for i in range(5):
+            person = self.Person(id=i)
+            article = self.Article(id=i)
+            content = 'me' if i % 2 else 'you'
+            comment = self.Comment(id=i, content=content)
+            article.author = person
+            comment.author = person
+            self.session.add_all([article, person, comment])
+        self.session.commit()
+        # Search for any articles with an author who has made comments that
+        # include the word "me".
+        content_filter = dict(name='content', op='like', val=url_quote('%me%'))
+        comment_filter = dict(name='comments', op='any', val=content_filter)
+        author_filter = dict(name='author', op='has', val=comment_filter)
+        filters = [author_filter]
+        response = self.search('/api/article', filters)
+        document = loads(response.data)
+        articles = document['data']
+        assert ['1', '3'] == sorted(article['id'] for article in articles)
 
     def test_comparing_fields(self):
         """Test for comparing the value of two fields in a filter object."""
@@ -304,11 +393,27 @@ class TestFiltering(SearchTestBase):
 
     def test_times(self):
         """Test for time parsing in filter objects."""
-        assert False, 'Not implemented'
+        person1 = self.Person(id=1, bedtime=time(17))
+        person2 = self.Person(id=2, bedtime=time(19))
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        filters = [dict(name='bedtime', op='eq', val='19:00')]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['2'] == sorted(person['id'] for person in people)
 
     def test_datetimes(self):
         """Test for datetime parsing in filter objects."""
-        assert False, 'Not implemented'
+        person1 = self.Person(id=1, birth_datetime=datetime(1900, 1, 2))
+        person2 = self.Person(id=2, birth_datetime=datetime(1969, 7, 20))
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        filters = [dict(name='birth_datetime', op='eq', val='1969-07-20')]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['2'] == sorted(person['id'] for person in people)
 
     def test_datetime_to_date(self):
         """Tests that a filter object with a datetime value and a field with a
@@ -332,7 +437,16 @@ class TestFiltering(SearchTestBase):
         time field.
 
         """
-        assert False, 'Not implemented'
+        person1 = self.Person(id=1, bedtime=time(1, 2))
+        person2 = self.Person(id=2, bedtime=time(14, 35))
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        datetimestring = datetime(1900, 1, 2, 14, 35).isoformat()
+        filters = [dict(name='bedtime', op='eq', val=datetimestring)]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['2'] == sorted(person['id'] for person in people)
 
     def test_bad_date(self):
         """Tests that an invalid date causes an error."""
@@ -642,16 +756,6 @@ class TestOperators(SearchTestBase):
         response = self.search('/api/person', filters)
         assert response.status_code == 400
         # TODO check the error message here.
-
-    # TODO I don't understand these operators, so I can't test them.
-    def test_desc(self):
-        """Tests for the ``desc`` operator."""
-        assert False, 'Not implemented'
-
-    # TODO I don't understand these operators, so I can't test them.
-    def test_asc(self):
-        """Tests for the ``asc`` operator."""
-        assert False, 'Not implemented'
 
 
 class TestAssociationProxy(SearchTestBase):

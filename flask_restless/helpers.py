@@ -118,6 +118,10 @@ def get_related_model(model, relationname):
 
     """
     if hasattr(model, relationname):
+        # inspector = sqlalchemy_inspect(model)
+        # attributes = inspector.attrs
+        # if relationname in attributes:
+        #     state = attributes[relationname]
         attr = getattr(model, relationname)
         if hasattr(attr, 'property') \
                 and isinstance(attr.property, RelProperty):

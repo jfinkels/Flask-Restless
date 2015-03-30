@@ -27,6 +27,7 @@ from sqlalchemy import func
 from sqlalchemy import Integer
 from sqlalchemy import Unicode
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import TypeDecorator
@@ -95,12 +96,21 @@ class TestDocumentStructure(ManagerTestBase):
         class Person(self.Base):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
-            articles = relationship('Article')
+            articles = relationship(Article)
+            comments = relationship('Comment')
+
+        class Comment(self.Base):
+            __tablename__ = 'comment'
+            id = Column(Integer, primary_key=True)
+            author_id = Column(Integer, ForeignKey('person.id'))
+            author = relationship('Person')
 
         self.Article = Article
+        self.Comment = Comment
         self.Person = Person
         self.Base.metadata.create_all()
         self.manager.create_api(Article)
+        self.manager.create_api(Comment)
         self.manager.create_api(Person, methods=['GET', 'POST'])
 
     def test_ignore_additional_members(self):
@@ -391,8 +401,22 @@ class TestDocumentStructure(ManagerTestBase):
         document.
 
         """
-        # For example, get articles and projects of a person.
-        assert False, 'Not implemented'
+        article = self.Article(id=3)
+        comment = self.Comment(id=2)
+        person = self.Person(id=1)
+        comment.author = person
+        article.author = person
+        self.session.add_all([article, person, comment])
+        self.session.commit()
+        query_string = dict(include='comments,articles')
+        response = self.app.get('/api/person/1', query_string=query_string)
+        document = loads(response.data)
+        person = document['data']
+        comments = person['links']['comments']['linkage']
+        articles = person['links']['articles']['linkage']
+        included = sorted(document['included'], key=lambda x: x['type'])
+        assert ['article', 'comment'] == [x['type'] for x in included]
+        assert ['3', '2'] == [x['id'] for x in included]
 
     def test_top_level_self_link(self):
         """Tests that there is a top-level links object containing a self link.
@@ -728,6 +752,8 @@ class TestFetchingData(ManagerTestBase):
             id = Column(Integer, primary_key=True)
             author_id = Column(Integer, ForeignKey('person.id'))
             author = relationship('Person')
+            article_id = Column(Integer, ForeignKey('article.id'))
+            article = relationship(Article, backref=backref('comments'))
 
         class Person(self.Base):
             __tablename__ = 'person'
@@ -890,15 +916,14 @@ class TestFetchingData(ManagerTestBase):
         .. _Fetching Resources: http://jsonapi.org/format/#fetching-resources
 
         """
-        article = self.Article(id=1)
-        self.session.add(article)
+        person = self.Person(id=1)
+        self.session.add(person)
         self.session.commit()
-        response = self.app.get('/api/article/1/author')
+        response = self.app.get('/api/person/1/articles')
         assert response.status_code == 200
         document = loads(response.data)
-        print(document)
-        author = document['data']
-        assert author is None
+        articles = document['data']
+        assert articles == []
 
     def test_empty_to_one_related_resource(self):
         """Tests for fetching an empty to-one related resource from a related
@@ -1115,6 +1140,26 @@ class TestFetchingData(ManagerTestBase):
         .. _Inclusion of Linked Resources: http://jsonapi.org/format/#fetching-includes
 
         """
+        article = self.Article(id=1)
+        comment1 = self.Comment(id=1)
+        comment2 = self.Comment(id=2)
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        comment1.article = article
+        comment2.article = article
+        comment1.author = person1
+        comment2.author = person2
+        self.session.add_all([article, comment1, comment2, person1, person2])
+        self.session.commit()
+        query_string = dict(include='comments.author')
+        response = self.app.get('/api/article/1', query_string=query_string)
+        document = loads(response.data)
+        authors = document['included']
+        print(authors)
+        assert all(author['type'] == 'person' for author in authors)
+        assert ['1', '2'] == sorted(author['id'] for author in authors)
+
+    def test_client_overrides_server_includes(self):
         assert False, 'Not implemented'
 
     def test_sparse_fieldsets(self):
@@ -1173,7 +1218,6 @@ class TestFetchingData(ManagerTestBase):
         response = self.app.get('/api/person?fields[person]=id,name')
         document = loads(response.data)
         people = document['data']
-        print(document)
         assert all(['id', 'name', 'type'] == sorted(p) for p in people)
 
     def test_sparse_fieldsets_multiple_types(self):

@@ -55,7 +55,6 @@ class TestFunctionEvaluation(ManagerTestBase):
         query = dumps(functions)
         response = self.app.get('/api/eval/person?functions={0}'.format(query))
         assert response.status_code == 200
-        print(response.data)
         document = loads(response.data)
         results = document['data']
         assert [45.0, 15.0, 3] == results
