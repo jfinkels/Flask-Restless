@@ -498,7 +498,7 @@ class QueryBuilder(object):
         if not _ignore_order_by:
             if sort:
                 for (symbol, field_name) in sort:
-                    direction_name = 'asc' if symbol is '+' else 'desc'
+                    direction_name = 'asc' if symbol == '+' else 'desc'
                     if '.' in field_name:
                         field_name, field_name_in_relation = \
                             field_name.split('.')
