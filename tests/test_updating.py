@@ -24,7 +24,6 @@ except ImportError:
     has_flask_sqlalchemy = False
 else:
     has_flask_sqlalchemy = True
-from json import JSONEncoder
 
 from sqlalchemy import Column
 from sqlalchemy import Date
@@ -43,6 +42,7 @@ from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
 from flask.ext.restless import ProcessingException
 
+from .helpers import BetterJSONEncoder as JSONEncoder
 from .helpers import DatabaseTestBase
 from .helpers import dumps
 from .helpers import FlaskTestBase
@@ -134,18 +134,12 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-
-        # datetime.time objects are not serializable by default so we need to
-        # create a custom JSON encoder class.
-        class TimeEncoder(JSONEncoder):
-            def default(self, o):
-                if isinstance(o, time):
-                    return o.isoformat()
-                return super(self, JSONEncoder).default(o)
         bedtime = datetime.now().time()
         data = dict(data=dict(type='person', id='1', bedtime=bedtime))
-        response = self.app.put('/api/person/1', data=dumps(data,
-                                                            cls=TimeEncoder))
+        # Python's built-in JSON encoder doesn't serialize date/time objects by
+        # default.
+        data = dumps(data, cls=JSONEncoder)
+        response = self.app.put('/api/person/1', data=data)
         assert response.status_code == 204
         assert person.bedtime == bedtime
 
@@ -154,27 +148,28 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        date_created = datetime.now().date()
-        data = dict(data=dict(type='person', id='1',
-                              date_created=date_created))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        today = datetime.now().date()
+        data = dict(data=dict(type='person', id='1', date_created=today))
+        # Python's built-in JSON encoder doesn't serialize date/time objects by
+        # default.
+        data = dumps(data, cls=JSONEncoder)
+        response = self.app.put('/api/person/1', data=data)
         assert response.status_code == 204
-        assert person.date_created == date_created
+        assert person.date_created == today
 
     def test_deserializing_datetime(self):
         """Test for deserializing a JSON representation of a date field."""
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        birth_datetime = datetime.now()
-        data = dict(data=dict(type='person', id='1',
-                              birth_datetime=birth_datetime))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        now = datetime.now()
+        data = dict(data=dict(type='person', id='1', birth_datetime=now))
+        # Python's built-in JSON encoder doesn't serialize date/time objects by
+        # default.
+        data = dumps(data, cls=JSONEncoder)
+        response = self.app.put('/api/person/1', data=data)
         assert response.status_code == 204
-        # When we did `dumps(data)` above, we lost the millisecond information,
-        # so we expect the updated person to not have that extra information.
-        birth_datetime = birth_datetime.replace(microsecond=0)
-        assert person.birth_datetime == birth_datetime
+        assert person.birth_datetime == now
 
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`201` if the

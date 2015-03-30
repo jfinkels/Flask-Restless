@@ -9,7 +9,12 @@
     :license: GNU AGPLv3+ or BSD
 
 """
+from datetime import date
+from datetime import datetime
+from datetime import time
+from datetime import timedelta
 import functools
+from json import JSONEncoder
 import sys
 import types
 
@@ -154,6 +159,24 @@ def force_json_contenttype(test_client):
     #                                      'application/json-patch+json')
 
 
+# In versions of Flask before 1.0, datetime and time objects are not
+# serializable by default so we need to create a custom JSON encoder class.
+#
+# TODO When Flask 1.0 is required, remove this.
+class BetterJSONEncoder(JSONEncoder):
+    """Extends the default JSON encoder to serialize objects from the
+    :mod:`datetime` module.
+
+    """
+
+    def default(self, obj):
+        if isinstance(obj, (date, datetime, time)):
+            return obj.isoformat()
+        if isinstance(obj, timedelta):
+            return int(obj.days * 86400 + obj.seconds)
+        return super(BetterJSONEncoder, self).default(obj)
+
+
 class FlaskTestBase(object):
     """Base class for tests which use a Flask application.
 
@@ -173,6 +196,8 @@ class FlaskTestBase(object):
         # absolute URLs.
         app.config['SERVER_NAME'] = 'localhost'
         app.logger.disabled = True
+        # Set the default JSON Encoder to serialize more things.
+        app.json_encoder = BetterJSONEncoder
         self.flaskapp = app
 
         # create the test client

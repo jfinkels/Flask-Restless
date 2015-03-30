@@ -16,7 +16,6 @@
 
 """
 from __future__ import division
-from json import JSONEncoder
 from datetime import time
 from datetime import timedelta
 from datetime import datetime
@@ -46,6 +45,7 @@ from flask.ext.restless import CONTENT_TYPE
 from flask.ext.restless import DeserializationException
 from flask.ext.restless import simple_serialize
 
+from .helpers import BetterJSONEncoder as JSONEncoder
 from .helpers import dumps
 from .helpers import DatabaseTestBase
 from .helpers import loads
@@ -126,17 +126,10 @@ class TestCreating(ManagerTestBase):
 
     def test_deserializing_time(self):
         """Test for deserializing a JSON representation of a time field."""
-        # datetime.time objects are not serializable by default so we need to
-        # create a custom JSON encoder class.
-        class TimeEncoder(JSONEncoder):
-            def default(self, o):
-                if isinstance(o, time):
-                    return o.isoformat()
-                return super(self, JSONEncoder).default(o)
         bedtime = datetime.now().time()
         data = dict(data=dict(type='person', bedtime=bedtime))
-        response = self.app.post('/api/person', data=dumps(data,
-                                                           cls=TimeEncoder))
+        data = dumps(data, cls=JSONEncoder)
+        response = self.app.post('/api/person', data=data)
         assert response.status_code == 201
         document = loads(response.data)
         person = document['data']
@@ -146,7 +139,8 @@ class TestCreating(ManagerTestBase):
         """Test for deserializing a JSON representation of a date field."""
         date_created = datetime.now().date()
         data = dict(data=dict(type='article', date_created=date_created))
-        response = self.app.post('/api/article', data=dumps(data))
+        data = dumps(data, cls=JSONEncoder)
+        response = self.app.post('/api/article', data=data)
         assert response.status_code == 201
         document = loads(response.data)
         article = document['data']
@@ -156,15 +150,12 @@ class TestCreating(ManagerTestBase):
         """Test for deserializing a JSON representation of a date field."""
         birth_datetime = datetime.now()
         data = dict(data=dict(type='person', birth_datetime=birth_datetime))
-        response = self.app.post('/api/person', data=dumps(data))
+        data = dumps(data, cls=JSONEncoder)
+        response = self.app.post('/api/person', data=data)
         assert response.status_code == 201
         document = loads(response.data)
         person = document['data']
-        # When we did `dumps(data)` above, we lost the millisecond information,
-        # so we expect the created person to not have that extra information.
-        isodatetime = birth_datetime.isoformat()
-        expected_datetime = isodatetime[:isodatetime.rfind('.')]
-        assert person['birth_datetime'] == expected_datetime
+        assert person['birth_datetime'] == birth_datetime.isoformat()
 
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`201` if the
@@ -349,15 +340,6 @@ class TestCreating(ManagerTestBase):
 
     def test_timedelta(self):
         """Tests for creating an object with a timedelta attribute."""
-        oldJSONEncoder = self.flaskapp.json_encoder
-
-        class IntervalJSONEncoder(oldJSONEncoder):
-            def default(self, obj):
-                if isinstance(obj, timedelta):
-                    return int(obj.days * 86400 + obj.seconds)
-                return oldJSONEncoder.default(self, obj)
-
-        self.flaskapp.json_encoder = IntervalJSONEncoder
         data = dict(data=dict(type='person', hangtime=300))
         response = self.app.post('/api/person', data=dumps(data))
         assert response.status_code == 201
