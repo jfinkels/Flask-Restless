@@ -14,9 +14,13 @@
 from sqlalchemy import Column
 from sqlalchemy import Integer
 
+from .helpers import dumps
+from .helpers import loads
 from .helpers import ManagerTestBase
+from .helpers import skip
 
 
+@skip('Not yet implemented')
 class TestCreating(ManagerTestBase):
     """Tests for creating multiple resources.
 
@@ -59,6 +63,7 @@ class TestCreating(ManagerTestBase):
 
 
 
+@skip('Not yet implemented')
 class TestUpdating(ManagerTestBase):
     """Tests for updating multiple resources.
 
@@ -215,6 +220,7 @@ class TestUpdating(ManagerTestBase):
 #         # TODO Check the error message, description, etc.
 
 
+@skip('Not yet implemented')
 class TestDeleting(ManagerTestBase):
     """Tests for deleting multiple resources.
 
@@ -240,7 +246,6 @@ class TestDeleting(ManagerTestBase):
         """Tests for deleting multiple resources."""
         assert False, 'Not implemented'
 
-    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_collection(self):
         """Tests for deleting all instances of a collection."""
         self.session.add_all(self.Person() for n in range(3))
@@ -253,7 +258,6 @@ class TestDeleting(ManagerTestBase):
         assert document['meta']['total'] == 3
         assert self.session.query(self.Person).count() == 0
 
-    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_empty_collection(self):
         """Tests that deleting an empty collection still yields a
         :http:status:`200` response.
@@ -266,7 +270,6 @@ class TestDeleting(ManagerTestBase):
         document = loads(response.data)
         assert document['meta']['total'] == 0
 
-    @skip('Deleting a collection only appears in the JSON API bulk extension')
     def test_filtered_collection(self):
         """Tests for deleting instances of a collection selected by filters."""
         person1 = self.Person(id=1)
