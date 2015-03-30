@@ -412,8 +412,6 @@ class TestDocumentStructure(ManagerTestBase):
         response = self.app.get('/api/person/1', query_string=query_string)
         document = loads(response.data)
         person = document['data']
-        comments = person['links']['comments']['linkage']
-        articles = person['links']['articles']['linkage']
         included = sorted(document['included'], key=lambda x: x['type'])
         assert ['article', 'comment'] == [x['type'] for x in included]
         assert ['3', '2'] == [x['id'] for x in included]
@@ -1026,10 +1024,10 @@ class TestFetchingData(ManagerTestBase):
         """Tests that by default, Flask-Restless includes no information in
         compound documents.
 
-        For more information, see the `Inclusion of Linked Resources`_ section
+        For more information, see the `Inclusion of Related Resources`_ section
         of the JSON API specification.
 
-        .. _Inclusion of Linked Resources: http://jsonapi.org/format/#fetching-includes
+        .. _Inclusion of Related Resources: http://jsonapi.org/format/#fetching-includes
 
         """
         person = self.Person(id=1)
@@ -1050,10 +1048,10 @@ class TestFetchingData(ManagerTestBase):
         """Tests that the user can specify default compound document
         inclusions when creating an API.
 
-        For more information, see the `Inclusion of Linked Resources`_ section
+        For more information, see the `Inclusion of Related Resources`_ section
         of the JSON API specification.
 
-        .. _Inclusion of Linked Resources: http://jsonapi.org/format/#fetching-includes
+        .. _Inclusion of Related Resources: http://jsonapi.org/format/#fetching-includes
 
         """
         person = self.Person(id=1)
@@ -1078,10 +1076,10 @@ class TestFetchingData(ManagerTestBase):
         """Tests that the client can specify which linked relations to include
         in a compound document.
 
-        For more information, see the `Inclusion of Linked Resources`_ section
+        For more information, see the `Inclusion of Related Resources`_ section
         of the JSON API specification.
 
-        .. _Inclusion of Linked Resources: http://jsonapi.org/format/#fetching-includes
+        .. _Inclusion of Related Resources: http://jsonapi.org/format/#fetching-includes
 
         """
         person = self.Person(id=1, name='foo')
@@ -1105,10 +1103,10 @@ class TestFetchingData(ManagerTestBase):
         """Tests that the client can specify multiple linked relations to
         include in a compound document.
 
-        For more information, see the `Inclusion of Linked Resources`_ section
+        For more information, see the `Inclusion of Related Resources`_ section
         of the JSON API specification.
 
-        .. _Inclusion of Linked Resources: http://jsonapi.org/format/#fetching-includes
+        .. _Inclusion of Related Resources: http://jsonapi.org/format/#fetching-includes
 
         """
         person = self.Person(id=1, name='foo')
@@ -1134,10 +1132,10 @@ class TestFetchingData(ManagerTestBase):
         """Tests that the client can specify resources linked to other
         resources to include in a compound document.
 
-        For more information, see the `Inclusion of Linked Resources`_ section
+        For more information, see the `Inclusion of Related Resources`_ section
         of the JSON API specification.
 
-        .. _Inclusion of Linked Resources: http://jsonapi.org/format/#fetching-includes
+        .. _Inclusion of Related Resources: http://jsonapi.org/format/#fetching-includes
 
         """
         article = self.Article(id=1)
@@ -1155,12 +1153,37 @@ class TestFetchingData(ManagerTestBase):
         response = self.app.get('/api/article/1', query_string=query_string)
         document = loads(response.data)
         authors = document['included']
-        print(authors)
         assert all(author['type'] == 'person' for author in authors)
         assert ['1', '2'] == sorted(author['id'] for author in authors)
 
     def test_client_overrides_server_includes(self):
-        assert False, 'Not implemented'
+        """Tests that if a client supplies an include query parameter, the
+        server does not include any other resource objects in the included
+        section of the compound document.
+
+        For more information, see the `Inclusion of Related Resources`_ section
+        of the JSON API specification.
+
+        .. _Inclusion of Related Resources: http://jsonapi.org/format/#fetching-includes
+
+        """
+        person = self.Person(id=1)
+        article = self.Article(id=2)
+        comment = self.Comment(id=3)
+        article.author = person
+        comment.author = person
+        self.session.add_all([person, article, comment])
+        self.session.commit()
+        # The server will, by default, include articles. The client will
+        # override this and request only comments.
+        self.manager.create_api(self.Person, url_prefix='/api2',
+                                includes=['articles'])
+        query_string = dict(include='comments')
+        response = self.app.get('/api2/person/1', query_string=query_string)
+        document = loads(response.data)
+        included = document['included']
+        assert ['3'] == sorted(obj['id'] for obj in included)
+        assert ['comment'] == sorted(obj['type'] for obj in included)
 
     def test_sparse_fieldsets(self):
         """Tests that the client can specify which fields to return in the

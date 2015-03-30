@@ -1121,6 +1121,8 @@ class API(APIBase):
         result['meta']['total'] = 1 if num_results is None else num_results
         return result, 200, headers
 
+    # TODO break this up into multiple methods: get_resource(),
+    # get_related_resource(), get_one_of related_resource()
     def _get_single(self, instid, relationname=None, relationinstid=None):
         for preprocessor in self.preprocessors['GET_RESOURCE']:
             temp_result = preprocessor(instance_id=instid)
@@ -1144,7 +1146,7 @@ class API(APIBase):
         # Get related instance instances as a primary resource or collection,
         # if requested.
         if relationname is not None:
-            primary_model = get_related_model(instance, relationname)
+            primary_model = get_related_model(self.model, relationname)
             if primary_model is None:
                 detail = 'No such relation: {0}'.format(primary_model)
                 return error_response(404, detail=detail)
