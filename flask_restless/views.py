@@ -58,7 +58,6 @@ from .helpers import get_model
 from .helpers import get_related_model
 from .helpers import has_field
 from .helpers import is_like_list
-from .helpers import model_for
 from .helpers import partition
 from .helpers import primary_key_name
 from .helpers import primary_key_value
@@ -841,9 +840,9 @@ class API(APIBase):
             self.serialize = serializer
         if deserializer is None:
             self.deserialize = self._dict_to_inst
-            # And check for our own default ValidationErrors here
-            self.validation_exceptions = tuple(list(self.validation_exceptions)
-                                               + [ValidationError])
+            # # And check for our own default ValidationErrors here
+            # self.validation_exceptions = tuple(list(self.validation_exceptions)
+            #                                    + [ValidationError])
         else:
             self.deserialize = deserializer
 
@@ -1182,8 +1181,8 @@ class API(APIBase):
         fields_for_primary = fields.get(collection_name(primary_model))
         try:
             if is_collection:
-                result = [self.serialize(instance, only=fields_for_primary)
-                          for instance in instances]
+                result = [self.serialize(inst, only=fields_for_primary)
+                          for inst in instances]
             else:
                 result = self.serialize(instance, only=fields_for_primary)
         except SerializationException as exception:
@@ -1661,14 +1660,12 @@ class API(APIBase):
             # instances of a SQLAlchemy model.
             try:
                 instances = [self.deserialize(obj) for obj in data]
+                self.session.add_all(instances)
+                self.session.commit()
             except DeserializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
-            # Add the created model to the session.
-            try:
-                self.session.add_all(instances)
-                self.session.commit()
             except self.validation_exceptions as exception:
                 return self._handle_validation_exception(exception)
         else:
@@ -1685,13 +1682,12 @@ class API(APIBase):
                 return error_response(409, detail=message)
             try:
                 instance = self.deserialize(data)
+                self.session.add(instance)
+                self.session.commit()
             except DeserializationException as exception:
                 current_app.logger.exception(str(exception))
                 detail = 'Failed to deserialize object'
                 return error_response(400, detail=detail)
-            try:
-                self.session.add(instance)
-                self.session.commit()
             except self.validation_exceptions as exception:
                 return self._handle_validation_exception(exception)
         # Get the dictionary representation of the new instance as it
@@ -2004,8 +2000,8 @@ class RelationshipAPI(APIBase):
             # Convert IDs to strings, as required by JSON API.
             #
             # TODO This could be paginated.
-            result = [dict(id=str(pk(instance)), type=related_type)
-                      for instance in related_value]
+            result = [dict(id=str(pk(inst)), type=related_type)
+                      for inst in related_value]
         # If this is a to-one relationship...
         else:
             if related_value is None:

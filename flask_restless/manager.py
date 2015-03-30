@@ -657,10 +657,10 @@ class APIManager(object):
         if serializer is None:
             serializer = DefaultSerializer(only, exclude,
                                            additional_attributes)
-            if validation_exceptions is None:
-                validation_exceptions = [DeserializationException]
-            else:
-                validation_exceptions.append(DeserializationException)
+            # if validation_exceptions is None:
+            #     validation_exceptions = [DeserializationException]
+            # else:
+            #     validation_exceptions.append(DeserializationException)
         if deserializer is None:
             deserializer = DefaultDeserializer(restlessinfo.session, model)
         # Create the view function for the API for this model.
