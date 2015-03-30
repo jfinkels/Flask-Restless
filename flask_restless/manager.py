@@ -664,6 +664,8 @@ class APIManager(object):
         if deserializer is None:
             deserializer = DefaultDeserializer(restlessinfo.session, model)
         # Create the view function for the API for this model.
+        #
+        # Rename some variables with long names for the sake of brevity.
         atmr = allow_to_many_replacement
         acgi = allow_client_generated_ids
         api_view = API.as_view(apiname, restlessinfo.session, model,

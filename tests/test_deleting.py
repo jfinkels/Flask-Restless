@@ -30,14 +30,12 @@ from flask.ext.restless import APIManager
 from flask.ext.restless import CONTENT_TYPE
 from flask.ext.restless import ProcessingException
 
-from .helpers import DatabaseTestBase
 from .helpers import dumps
 from .helpers import loads
 from .helpers import FlaskTestBase
 from .helpers import ManagerTestBase
 from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
-from .helpers import skip
 from .helpers import skip_unless
 from .helpers import unregister_fsa_session_signals
 
@@ -247,35 +245,6 @@ class TestProcessors(ManagerTestBase):
         assert 'forbidden' == error['detail']
         # Ensure that the person has not been deleted.
         assert self.session.query(self.Person).first() == person
-
-    @skip('Deleting a collection only appears in the JSON API bulk extension')
-    def test_collection_preprocessor(self):
-        """Tests for a preprocessor on a request to delete a collection."""
-        person1 = self.Person(id=1)
-        person2 = self.Person(id=2)
-        self.session.add_all([person1, person2])
-        self.session.commit()
-
-        def restrict_ids(filters=None, **kw):
-            """Adds an additional filter to any existing filters that restricts
-            which resources appear in the response.
-
-            """
-            if filters is None:
-                raise ProcessingException(code=400)
-            filt = dict(name='id', op='lt', val=2)
-            filters.append(filt)
-
-        preprocessors = dict(DELETE_COLLECTION=[restrict_ids])
-        self.manager.create_api(self.Person, methods=['DELETE'],
-                                allow_delete_many=True,
-                                preprocessors=preprocessors)
-        response = self.app.delete('/api/person')
-        assert response.status_code == 200
-        document = loads(response.data)
-        assert document['meta']['total'] == 1
-        # Ensure that person1 was deleted.
-        assert [person2] == self.session.query(self.Person).all()
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')

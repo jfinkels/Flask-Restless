@@ -286,3 +286,31 @@ class TestDeleting(ManagerTestBase):
         document = loads(response.data)
         assert document['meta']['total'] == 2
         assert [person3] == self.session.query(self.Person).all()
+
+    def test_collection_preprocessor(self):
+        """Tests for a preprocessor on a request to delete a collection."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+
+        def restrict_ids(filters=None, **kw):
+            """Adds an additional filter to any existing filters that restricts
+            which resources appear in the response.
+
+            """
+            if filters is None:
+                raise ProcessingException(code=400)
+            filt = dict(name='id', op='lt', val=2)
+            filters.append(filt)
+
+        preprocessors = dict(DELETE_COLLECTION=[restrict_ids])
+        self.manager.create_api(self.Person, methods=['DELETE'],
+                                allow_delete_many=True,
+                                preprocessors=preprocessors)
+        response = self.app.delete('/api/person')
+        assert response.status_code == 200
+        document = loads(response.data)
+        assert document['meta']['total'] == 1
+        # Ensure that person1 was deleted.
+        assert [person2] == self.session.query(self.Person).all()

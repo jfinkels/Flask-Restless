@@ -41,7 +41,6 @@ from flask.ext.restless import ProcessingException
 from flask.ext.restless import simple_serialize
 from flask.ext.restless import SerializationException
 
-from .helpers import DatabaseTestBase
 from .helpers import dumps
 from .helpers import FlaskTestBase
 from .helpers import loads

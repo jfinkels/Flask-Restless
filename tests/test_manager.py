@@ -220,11 +220,22 @@ class TestAPIManager(ManagerTestBase):
         function.
 
         """
-        assert False, 'Not implemented'
+        self.manager.create_api(self.Person, collection_name='people')
+        assert collection_name(self.Person) == 'people'
 
     def test_model_for(self):
         """Tests the global :func:`flask.ext.restless.model_for` function."""
-        assert False, 'Not implemented'
+        self.manager.create_api(self.Person, collection_name='people')
+        assert model_for('people') is self.Person
+
+    def test_model_for_collection_name(self):
+        """Tests that :func:`flask.ext.restless.model_for` is the inverse of
+        :func:`flask.ext.restless.collection_name`.
+
+        """
+        self.manager.create_api(self.Person, collection_name='people')
+        assert collection_name(model_for('people')) == 'people'
+        assert model_for(collection_name(self.Person)) is self.Person
 
     def test_disallowed_methods(self):
         """Tests that disallowed methods respond with :http:status:`405`."""
