@@ -240,7 +240,7 @@ class TestAPIManager(ManagerTestBase):
     def test_disallowed_methods(self):
         """Tests that disallowed methods respond with :http:status:`405`."""
         self.manager.create_api(self.Person, methods=[])
-        for method in 'get', 'post', 'put', 'delete':
+        for method in 'get', 'post', 'patch', 'delete':
             func = getattr(self.app, method)
             response = func('/api/person')
             assert response.status_code == 405

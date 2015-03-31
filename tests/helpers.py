@@ -150,7 +150,7 @@ def force_json_contenttype(test_client):
             return func(*args, **kw)
         return new_func
 
-    for methodname in ('get', 'put', 'post', 'delete'):
+    for methodname in ('get', 'patch', 'post', 'delete'):
         # Decorate the original test client request method.
         old_method = getattr(test_client, methodname)
         setattr(test_client, methodname, set_content_type(old_method))

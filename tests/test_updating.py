@@ -110,12 +110,12 @@ class TestUpdating(ManagerTestBase):
         self.Interval = Interval
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Article, methods=['PUT'])
-        self.manager.create_api(Interval, methods=['PUT'])
-        self.manager.create_api(Person, methods=['PUT'])
+        self.manager.create_api(Article, methods=['PATCH'])
+        self.manager.create_api(Interval, methods=['PATCH'])
+        self.manager.create_api(Person, methods=['PATCH'])
 
     def test_related_resource_url_forbidden(self):
-        """Tests that :http:method:`put` requests to a related resource URL
+        """Tests that :http:method:`patch` requests to a related resource URL
         are forbidden.
 
         """
@@ -124,7 +124,7 @@ class TestUpdating(ManagerTestBase):
         self.session.add_all([article, person])
         self.session.commit()
         data = dict(data=dict(type='person', id=1))
-        response = self.app.put('/api/article/1/author', data=dumps(data))
+        response = self.app.patch('/api/article/1/author', data=dumps(data))
         assert response.status_code == 405
         # TODO check error message here
         assert article.author == None
@@ -139,7 +139,7 @@ class TestUpdating(ManagerTestBase):
         # Python's built-in JSON encoder doesn't serialize date/time objects by
         # default.
         data = dumps(data, cls=JSONEncoder)
-        response = self.app.put('/api/person/1', data=data)
+        response = self.app.patch('/api/person/1', data=data)
         assert response.status_code == 204
         assert person.bedtime == bedtime
 
@@ -153,7 +153,7 @@ class TestUpdating(ManagerTestBase):
         # Python's built-in JSON encoder doesn't serialize date/time objects by
         # default.
         data = dumps(data, cls=JSONEncoder)
-        response = self.app.put('/api/person/1', data=data)
+        response = self.app.patch('/api/person/1', data=data)
         assert response.status_code == 204
         assert person.date_created == today
 
@@ -167,7 +167,7 @@ class TestUpdating(ManagerTestBase):
         # Python's built-in JSON encoder doesn't serialize date/time objects by
         # default.
         data = dumps(data, cls=JSONEncoder)
-        response = self.app.put('/api/person/1', data=data)
+        response = self.app.patch('/api/person/1', data=data)
         assert response.status_code == 204
         assert person.birth_datetime == now
 
@@ -180,7 +180,7 @@ class TestUpdating(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1'))
-        response = self.app.put('/api/person/1', data=dumps(data),
+        response = self.app.patch('/api/person/1', data=dumps(data),
                                 content_type=CONTENT_TYPE)
         assert response.status_code == 204
         assert response.headers['Content-Type'] == CONTENT_TYPE
@@ -194,7 +194,7 @@ class TestUpdating(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1'))
-        response = self.app.put('/api/person/1', data=dumps(data),
+        response = self.app.patch('/api/person/1', data=dumps(data),
                                 content_type=None)
         assert response.status_code == 415
         assert response.headers['Content-Type'] == CONTENT_TYPE
@@ -210,7 +210,7 @@ class TestUpdating(ManagerTestBase):
         data = dict(data=dict(type='person', id='1'))
         bad_content_types = ('application/json', 'application/javascript')
         for content_type in bad_content_types:
-            response = self.app.put('/api/person/1', data=dumps(data),
+            response = self.app.patch('/api/person/1', data=dumps(data),
                                     content_type=content_type)
             assert response.status_code == 415
             assert response.headers['Content-Type'] == CONTENT_TYPE
@@ -230,7 +230,7 @@ class TestUpdating(ManagerTestBase):
         headers = {'User-Agent': MSIE8_UA}
         content_type = 'text/html'
         data = dict(data=dict(type='person', id='1'))
-        response = self.app.put('/api/person/1', data=dumps(data),
+        response = self.app.patch('/api/person/1', data=dumps(data),
                                 headers=headers, content_type=content_type)
         assert response.status_code == 204
 
@@ -249,7 +249,7 @@ class TestUpdating(ManagerTestBase):
         headers = {'User-Agent': MSIE9_UA}
         content_type = 'text/html'
         data = dict(data=dict(type='person', id='1'))
-        response = self.app.put('/api/person/1', data=dumps(data),
+        response = self.app.patch('/api/person/1', data=dumps(data),
                                 headers=headers, content_type=content_type)
         assert response.status_code == 204
 
@@ -264,32 +264,32 @@ class TestUpdating(ManagerTestBase):
         self.session.add_all([person1, person2])
         self.session.commit()
         data = dict(data=dict(type='person', id='2', name='foo'))
-        response = self.app.put('/api/person/2', data=dumps(data))
+        response = self.app.patch('/api/person/2', data=dumps(data))
         assert response.status_code == 409  # Conflict
         assert self.session.is_active, 'Session is in `partial rollback` state'
         person = dict(data=dict(type='person', id='2', name='baz'))
-        response = self.app.put('/api/person/2', data=dumps(person))
+        response = self.app.patch('/api/person/2', data=dumps(person))
         assert response.status_code == 204
         assert person2.name == 'baz'
 
     def test_empty_request(self):
-        """Test for making a :http:method:`put` request with no data."""
+        """Test for making a :http:method:`patch` request with no data."""
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        response = self.app.put('/api/person/1')
+        response = self.app.patch('/api/person/1')
         assert response.status_code == 400
         # TODO check the error message here
 
     def test_empty_string(self):
-        """Test for making a :http:method:`put` request with an empty string,
+        """Test for making a :http:method:`patch` request with an empty string,
         which is invalid JSON.
 
         """
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        response = self.app.put('/api/person/1', data='')
+        response = self.app.patch('/api/person/1', data='')
         assert response.status_code == 400
         # TODO check the error message here
 
@@ -298,12 +298,12 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        response = self.app.put('/api/person/1', data='Invalid JSON string')
+        response = self.app.patch('/api/person/1', data='Invalid JSON string')
         assert response.status_code == 400
         # TODO check error message here
 
     def test_nonexistent_attribute(self):
-        """Tests that attempting to make a :http:method:`put` request on an
+        """Tests that attempting to make a :http:method:`patch` request on an
         attribute that does not exist on the specified model yields an error
         response.
 
@@ -312,7 +312,7 @@ class TestUpdating(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', bogus=0))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert 400 == response.status_code
 
     def test_read_only_hybrid_property(self):
@@ -326,7 +326,7 @@ class TestUpdating(ManagerTestBase):
         self.session.add(interval)
         self.session.commit()
         data = dict(data=dict(type='interval', id='1', radius=1))
-        response = self.app.put('/api/interval/1', data=dumps(data))
+        response = self.app.patch('/api/interval/1', data=dumps(data))
         assert response.status_code == 400
         # TODO check error message here
 
@@ -336,7 +336,7 @@ class TestUpdating(ManagerTestBase):
         self.session.add(interval)
         self.session.commit()
         data = dict(data=dict(type='interval', id='1', length=4))
-        response = self.app.put('/api/interval/1', data=dumps(data))
+        response = self.app.patch('/api/interval/1', data=dumps(data))
         assert response.status_code == 204
         assert interval.start == 5
         assert interval.end == 9
@@ -347,10 +347,10 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 collection_name='people')
         data = dict(data=dict(type='people', id='1', name='foo'))
-        response = self.app.put('/api/people/1', data=dumps(data))
+        response = self.app.patch('/api/people/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'foo'
 
@@ -359,14 +359,14 @@ class TestUpdating(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2')
         data = dict(data=dict(type='person', id='1', name='foo'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'foo'
         data = dict(data=dict(type='person', id='1', name='bar'))
-        response = self.app.put('/api2/person/1', data=dumps(data))
+        response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'bar'
 
@@ -535,11 +535,11 @@ class TestProcessors(ManagerTestBase):
                 raise ProcessingException(code=400)
             return str(int(instance_id) + 1)
 
-        preprocessors = dict(PUT_RESOURCE=[increment_id])
-        self.manager.create_api(self.Person, methods=['PUT'],
+        preprocessors = dict(PATCH_RESOURCE=[increment_id])
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 preprocessors=preprocessors)
         data = dict(data=dict(type='person', id='1', name='foo'))
-        response = self.app.put('/api/person/0', data=dumps(data))
+        response = self.app.patch('/api/person/0', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'foo'
 
@@ -555,11 +555,11 @@ class TestProcessors(ManagerTestBase):
         def forbidden(**kw):
             raise ProcessingException(code=403, description='forbidden')
 
-        preprocessors = dict(PUT_RESOURCE=[forbidden])
-        self.manager.create_api(self.Person, methods=['PUT'],
+        preprocessors = dict(PATCH_RESOURCE=[forbidden])
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 preprocessors=preprocessors)
         data = dict(data=dict(type='person', id='1', name='bar'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 403
         document = loads(response.data)
         errors = document['errors']
@@ -569,7 +569,7 @@ class TestProcessors(ManagerTestBase):
         assert person.name == 'foo'
 
     def test_single_resource(self):
-        """Tests :http:method:`put` requests for a single resource with a
+        """Tests :http:method:`patch` requests for a single resource with a
         preprocessor function.
 
         """
@@ -585,11 +585,11 @@ class TestProcessors(ManagerTestBase):
             if data is not None:
                 data['data']['name'] = 'bar'
 
-        preprocessors = dict(PUT_RESOURCE=[set_name])
-        self.manager.create_api(self.Person, methods=['PUT'],
+        preprocessors = dict(PATCH_RESOURCE=[set_name])
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 preprocessors=preprocessors)
         data = dict(data=dict(type='person', id='1', name='baz'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'bar'
 
@@ -668,8 +668,8 @@ class TestAssociationProxy(ManagerTestBase):
         self.Article = Article
         self.Tag = Tag
         self.Base.metadata.create_all()
-        self.manager.create_api(Article, methods=['PUT'])
-        self.manager.create_api(User, methods=['PUT'])
+        self.manager.create_api(Article, methods=['PATCH'])
+        self.manager.create_api(User, methods=['PATCH'])
         # HACK Need to create APIs for these other models because otherwise
         # we're not able to create the link URLs to them.
         #
@@ -693,7 +693,7 @@ class TestAssociationProxy(ManagerTestBase):
         tag2 = self.Tag(id=2)
         self.session.add_all([article, tag1, tag2])
         self.session.commit()
-        self.manager.create_api(self.Article, methods=['PUT'],
+        self.manager.create_api(self.Article, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
         data = {'data':
@@ -706,7 +706,7 @@ class TestAssociationProxy(ManagerTestBase):
                           }
                      }
                 }
-        response = self.app.put('/api2/article/1', data=dumps(data))
+        response = self.app.patch('/api2/article/1', data=dumps(data))
         assert response.status_code == 204
         assert set(article.tags) == set((tag1, tag2))
 
@@ -723,7 +723,7 @@ class TestAssociationProxy(ManagerTestBase):
         self.session.commit()
         tag_names = ['foo', 'bar']
         data = dict(data=dict(type='article', id='1', tag_names=tag_names))
-        response = self.app.put('/api/article/1', data=dumps(data))
+        response = self.app.patch('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert ['foo', 'bar'] == article.tag_names
 
@@ -811,7 +811,7 @@ class TestFlaskSqlalchemy(FlaskTestBase):
         self.Person = Person
         self.db.create_all()
         self.manager = APIManager(self.flaskapp, flask_sqlalchemy_db=self.db)
-        self.manager.create_api(self.Person, methods=['PUT'])
+        self.manager.create_api(self.Person, methods=['PATCH'])
 
     def tearDown(self):
         """Drops all tables and unregisters Flask-SQLAlchemy session signals.
@@ -826,6 +826,6 @@ class TestFlaskSqlalchemy(FlaskTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', name='bar'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.name == 'bar'

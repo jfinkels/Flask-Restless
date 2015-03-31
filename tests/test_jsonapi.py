@@ -1559,9 +1559,9 @@ class TestUpdatingResources(ManagerTestBase):
         self.Person = Person
         self.Tag = Tag
         self.Base.metadata.create_all()
-        self.manager.create_api(Article, methods=['PUT'])
-        self.manager.create_api(Person, methods=['PUT'])
-        self.manager.create_api(Tag, methods=['GET', 'PUT'])
+        self.manager.create_api(Article, methods=['PATCH'])
+        self.manager.create_api(Person, methods=['PATCH'])
+        self.manager.create_api(Tag, methods=['GET', 'PATCH'])
 
     def test_update(self):
         """Tests that the client can update a resource's attributes.
@@ -1576,7 +1576,7 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', name='bar'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.id == 1
         assert person.name == 'bar'
@@ -1607,7 +1607,7 @@ class TestUpdatingResources(ManagerTestBase):
                           }
                      }
                 }
-        response = self.app.put('/api/article/1', data=dumps(data))
+        response = self.app.patch('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert article.author is person2
 
@@ -1633,7 +1633,7 @@ class TestUpdatingResources(ManagerTestBase):
                          {'author': None}
                      }
                 }
-        response = self.app.put('/api/article/1', data=dumps(data))
+        response = self.app.patch('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert article.author is None
 
@@ -1651,7 +1651,7 @@ class TestUpdatingResources(ManagerTestBase):
         article2 = self.Article(id=2)
         self.session.add_all([person, article1, article2])
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
         data = {'data':
@@ -1663,7 +1663,7 @@ class TestUpdatingResources(ManagerTestBase):
                           }
                      }
                 }
-        response = self.app.put('/api2/person/1', data=dumps(data))
+        response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 204
         assert set(person.articles) == {article1, article2}
 
@@ -1682,7 +1682,7 @@ class TestUpdatingResources(ManagerTestBase):
         person.articles = [article1, article2]
         self.session.add_all([person, article1, article2])
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
         data = {'data':
@@ -1691,7 +1691,7 @@ class TestUpdatingResources(ManagerTestBase):
                      'links': {'articles': []}
                      }
                 }
-        response = self.app.put('/api2/person/1', data=dumps(data))
+        response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.articles == []
 
@@ -1715,7 +1715,7 @@ class TestUpdatingResources(ManagerTestBase):
                      'links': {'articles': []}
                      }
                 }
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 403
 
     def test_other_modifications(self):
@@ -1733,7 +1733,7 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add(tag)
         self.session.commit()
         data = dict(data=dict(type='tag', id='1', name='foo'))
-        response = self.app.put('/api/tag/1', data=dumps(data))
+        response = self.app.patch('/api/tag/1', data=dumps(data))
         assert response.status_code == 200
         document = loads(response.data)
         tag1 = document['data']
@@ -1753,7 +1753,7 @@ class TestUpdatingResources(ManagerTestBase):
 
         """
         data = dict(data=dict(type='person', id='1'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 404
 
     def test_nonexistent_relationship(self):
@@ -1769,7 +1769,7 @@ class TestUpdatingResources(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
         data = {'data':
@@ -1778,7 +1778,7 @@ class TestUpdatingResources(ManagerTestBase):
                      'links': {'articles': [{'type': 'article', 'id': '1'}]}
                      }
                 }
-        response = self.app.put('/api2/person/1', data=dumps(data))
+        response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 404
         # TODO test for error details
 
@@ -1798,7 +1798,7 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add_all([person1, person2])
         self.session.commit()
         data = dict(data=dict(type='person', id='2', name='foo'))
-        response = self.app.put('/api/person/2', data=dumps(data))
+        response = self.app.patch('/api/person/2', data=dumps(data))
         assert response.status_code == 409
         # TODO test for error details
 
@@ -1816,7 +1816,7 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='bogus', id='1'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 409
         # TODO test for error details
 
@@ -1834,7 +1834,7 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='bogus'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 409
         # TODO test for error details
 
@@ -1870,11 +1870,11 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.Article = Article
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(self.Person, methods=['PUT', 'POST', 'DELETE'])
-        self.manager.create_api(self.Article, methods=['PUT'])
+        self.manager.create_api(self.Person, methods=['PATCH', 'POST', 'DELETE'])
+        self.manager.create_api(self.Article, methods=['PATCH'])
 
     def test_to_one(self):
-        """Tests for updating a to-one relationship via a :http:method:`put`
+        """Tests for updating a to-one relationship via a :http:method:`patch`
         request to a relationship URL.
 
         For more information, see the `Updating To-One Relationships`_ section
@@ -1890,13 +1890,13 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.session.add_all([person1, person2, article])
         self.session.commit()
         data = dict(data=dict(type='person', id='2'))
-        response = self.app.put('/api/article/1/links/author',
+        response = self.app.patch('/api/article/1/links/author',
                                 data=dumps(data))
         assert response.status_code == 204
         assert article.author is person2
 
     def test_remove_to_one(self):
-        """Tests for removing a to-one relationship via a :http:method:`put`
+        """Tests for removing a to-one relationship via a :http:method:`patch`
         request to a relationship URL.
 
         For more information, see the `Updating To-One Relationships`_ section
@@ -1912,13 +1912,13 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.session.add_all([person1, person2, article])
         self.session.commit()
         data = dict(data=None)
-        response = self.app.put('/api/article/1/links/author',
+        response = self.app.patch('/api/article/1/links/author',
                                 data=dumps(data))
         assert response.status_code == 204
         assert article.author is None
 
     def test_to_many(self):
-        """Tests for replacing a to-many relationship via a :http:method:`put`
+        """Tests for replacing a to-many relationship via a :http:method:`patch`
         request to a relationship URL.
 
         For more information, see the `Updating To-Many Relationships`_ section
@@ -1932,12 +1932,12 @@ class TestUpdatingRelationships(ManagerTestBase):
         article2 = self.Article(id=2)
         self.session.add_all([person, article1, article2])
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
         data = {'data': [{'type': 'article', 'id': '1'},
                          {'type': 'article', 'id': '2'}]}
-        response = self.app.put('/api2/person/1/links/articles',
+        response = self.app.patch('/api2/person/1/links/articles',
                                 data=dumps(data))
         assert response.status_code == 204
         assert set(person.articles) == {article1, article2}
@@ -1956,12 +1956,12 @@ class TestUpdatingRelationships(ManagerTestBase):
         article = self.Article(id=1)
         self.session.add_all([person, article])
         self.session.commit()
-        self.manager.create_api(self.Person, methods=['PUT'],
+        self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
         data = {'data': [{'type': 'article', 'id': '1'},
                          {'type': 'article', 'id': '2'}]}
-        response = self.app.put('/api2/person/1/links/articles',
+        response = self.app.patch('/api2/person/1/links/articles',
                                 data=dumps(data))
         assert response.status_code == 404
         # TODO test error messages
@@ -1980,7 +1980,7 @@ class TestUpdatingRelationships(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = {'data': []}
-        response = self.app.put('/api/person/1/links/articles',
+        response = self.app.patch('/api/person/1/links/articles',
                                 data=dumps(data))
         assert response.status_code == 403
         # TODO test error messages

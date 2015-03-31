@@ -68,7 +68,7 @@ class TestSimpleValidation(ManagerTestBase):
 
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Person, methods=['POST', 'PUT'],
+        self.manager.create_api(Person, methods=['POST', 'PATCH'],
                                 validation_exceptions=[CoolValidationError])
 
     def test_create_valid(self):
@@ -108,7 +108,7 @@ class TestSimpleValidation(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', age=2))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         print(response.data)
         assert response.status_code == 204
         assert person.age == 2
@@ -122,7 +122,7 @@ class TestSimpleValidation(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', age=-1))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 400
         document = loads(response.data)
         errors = document['errors']
@@ -157,7 +157,7 @@ class TestSAValidation(ManagerTestBase):
         self.Person = Person
         self.Base.metadata.create_all()
         exceptions = [_sav.ValidationError]
-        self.manager.create_api(Person, methods=['POST', 'PUT'],
+        self.manager.create_api(Person, methods=['POST', 'PATCH'],
                                 validation_exceptions=exceptions)
 
     def test_create_valid(self):
@@ -213,7 +213,7 @@ class TestSAValidation(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', email='foo@example.com'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.email == u'foo@example.com'
 
@@ -226,7 +226,7 @@ class TestSAValidation(ManagerTestBase):
         self.session.add(person)
         self.session.commit()
         data = dict(data=dict(type='person', id='1', email='bogus'))
-        response = self.app.put('/api/person/1', data=dumps(data))
+        response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 400
         document = loads(response.data)
         errors = document['errors']

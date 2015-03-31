@@ -530,7 +530,7 @@ class APIBase(ModelView):
         # we need to have a session object available to roll back. Therefore we
         # need to manually decorate each of the view functions here.
         decorate = lambda name, f: setattr(self, name, f(getattr(self, name)))
-        for method in ['get', 'post', 'patch', 'put', 'delete']:
+        for method in ['get', 'post', 'patch', 'delete']:
             # Check if the subclass has the method before trying to decorate
             # it.
             if hasattr(self, method):
@@ -558,9 +558,8 @@ class APIBase(ModelView):
 
 class API(APIBase):
     """Provides method-based dispatching for :http:method:`get`,
-    :http:method:`post`, :http:method:`patch`, :http:method:`put`, and
-    :http:method:`delete` requests, for both collections of models and
-    individual models.
+    :http:method:`post`, :http:method:`patch`, and :http:method:`delete`
+    requests, for both collections of models and individual models.
 
     """
 
@@ -1416,7 +1415,7 @@ class API(APIBase):
             current_app.logger.exception(str(exception))
             return self._handle_validation_exception(exception)
 
-    def put(self, instid, relationname, relationinstid):
+    def patch(self, instid, relationname, relationinstid):
         """Updates the instance specified by ``instid`` of the named model, or
         updates multiple instances if ``instid`` is ``None``.
 
@@ -1441,11 +1440,11 @@ class API(APIBase):
            Added the `relationname` keyword argument.
 
         """
-        # Check if this is an attempt to PUT to a related resource URL.
+        # Check if this is an attempt to PATCH to a related resource URL.
         if (instid is not None and relationname is not None
             and relationinstid is None):
-            detail = ('Cannot PUT to a related resource URL; perhaps you'
-                      ' meant to PUT to {0}/{1}/links/{2}')
+            detail = ('Cannot PATCH to a related resource URL; perhaps you'
+                      ' meant to PATCH to {0}/{1}/links/{2}')
             detail = detail.format(self.collection_name, instid, relationname)
             return error_response(403, detail=detail)
         # try to load the fields/values to update from the body of the request
@@ -1455,7 +1454,7 @@ class API(APIBase):
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-        for preprocessor in self.preprocessors['PUT_RESOURCE']:
+        for preprocessor in self.preprocessors['PATCH_RESOURCE']:
             temp_result = preprocessor(instance_id=instid, data=data)
             # See the note under the preprocessor in the get() method.
             if temp_result is not None:
@@ -1526,7 +1525,7 @@ class API(APIBase):
             result = dict()
             status = 204
         # Perform any necessary postprocessing.
-        for postprocessor in self.postprocessors['PUT_RESOURCE']:
+        for postprocessor in self.postprocessors['PATCH_RESOURCE']:
             postprocessor()
         return result, status
 
@@ -1655,7 +1654,7 @@ class RelationshipAPI(APIBase):
             postprocessor()
         return {}, 204
 
-    def put(self, instid, relationname):
+    def patch(self, instid, relationname):
         # try to load the fields/values to update from the body of the request
         try:
             data = json.loads(request.get_data()) or {}
@@ -1663,7 +1662,7 @@ class RelationshipAPI(APIBase):
             # this also happens when request.data is empty
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to decode data')
-        for preprocessor in self.preprocessors['PUT_RELATIONSHIP']:
+        for preprocessor in self.preprocessors['PATCH_RELATIONSHIP']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname, data=data)
             # See the note under the preprocessor in the get() method.
@@ -1763,7 +1762,7 @@ class RelationshipAPI(APIBase):
         #     self.session.commit()
         #
         # Perform any necessary postprocessing.
-        for postprocessor in self.postprocessors['PUT_RELATIONSHIP']:
+        for postprocessor in self.postprocessors['PATCH_RELATIONSHIP']:
             postprocessor()
         return {}, 204
 

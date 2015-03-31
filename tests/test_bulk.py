@@ -83,7 +83,7 @@ class TestUpdating(ManagerTestBase):
 
         self.Person = Person
         self.Base.metadata.create_all()
-        self.manager.create_api(Person, methods=['PUT'], enable_bulk=True)
+        self.manager.create_api(Person, methods=['PATCH'], enable_bulk=True)
 
     def test_update(self):
         """Tests for updating multiple resources."""
@@ -165,7 +165,7 @@ class TestUpdating(ManagerTestBase):
     #     assert num_modified == 1
 
     # def test_preprocessor(self):
-    #     """Tests :http:method:`put` requests for a collection of resources with
+    #     """Tests :http:method:`patch` requests for a collection of resources with
     #     a preprocessor function.
 
     #     """
@@ -182,18 +182,18 @@ class TestUpdating(ManagerTestBase):
     #         if data is not None:
     #             data['data']['name'] = 'xyzzy'
 
-    #     preprocessors = dict(PUT_COLLECTION=[set_name])
-    #     self.manager.create_api(self.Person, methods=['PUT'],
+    #     preprocessors = dict(PATCH_COLLECTION=[set_name])
+    #     self.manager.create_api(self.Person, methods=['PATCH'],
     #                             allow_patch_many=True,
     #                             preprocessors=preprocessors)
     #     data = dict(data=dict(type='person', name='baz'))
-    #     response = self.app.put('/api/person', data=dumps(data))
+    #     response = self.app.patch('/api/person', data=dumps(data))
     #     assert response.status_code == 200
     #     document = loads(response.data)
     #     assert document['meta']['total'] == 2
     #     assert all(person.name == 'xyzzy' for person in (person1, person2))
 
-#     def test_put_multiple(self):
+#     def test_patch_multiple(self):
 #         person1 = self.Person(id=1, name='foo')
 #         person2 = self.Person(id=2, age=99)
 #         self.session.add_all([person1, person2])
@@ -201,12 +201,12 @@ class TestUpdating(ManagerTestBase):
 
 #         # Updates a different field on each person.
 #         data = dict(person=[dict(id=1, name='bar'), dict(id=2, age=10)])
-#         response = self.app.put('/api/person/1,2', data=dumps(data))
+#         response = self.app.patch('/api/person/1,2', data=dumps(data))
 #         assert response.status_code == 204
 #         assert person1.name == 'bar'
 #         assert person2.age == 10
 
-#     def test_put_multiple_without_id(self):
+#     def test_patch_multiple_without_id(self):
 #         person1 = self.Person(id=1, name='foo')
 #         person2 = self.Person(id=2, age=99)
 #         self.session.add_all([person1, person2])
@@ -215,7 +215,7 @@ class TestUpdating(ManagerTestBase):
 #         # In order to avoid ambiguity, attempts to update multiple instances
 #         # without specifying the ID in each object results in an error.
 #         data = dict(person=[dict(name='bar'), dict(id=2, age=10)])
-#         response = self.app.put('/api/person/1,2', data=dumps(data))
+#         response = self.app.patch('/api/person/1,2', data=dumps(data))
 #         assert response.status_code == 400
 #         # TODO Check the error message, description, etc.
 

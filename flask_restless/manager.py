@@ -38,7 +38,7 @@ from .views import RelationshipAPI
 READONLY_METHODS = frozenset(('GET', ))
 
 #: The set of all recognized HTTP methods.
-ALL_METHODS = frozenset(('GET', 'PUT', 'POST', 'DELETE'))
+ALL_METHODS = frozenset(('GET', 'PATCH', 'POST', 'DELETE'))
 
 #: A triple that stores the SQLAlchemy session and the universal pre- and post-
 #: processors to be applied to any API created for a particular Flask
@@ -737,7 +737,7 @@ class APIManager(object):
         # The URL for accessing a single resource.
         #
         # For example, /api/people/1.
-        resource_methods = frozenset(('GET', 'PUT', 'DELETE')) & methods
+        resource_methods = frozenset(('GET', 'PATCH', 'DELETE')) & methods
         resource_defaults = dict(relationname=None, relationinstid=None)
         add_rule(resource_url, view_func=api_view, methods=resource_methods,
                  defaults=resource_defaults)
