@@ -113,42 +113,6 @@ OPERATORS = {
 }
 
 
-class OrderBy(object):
-    """Represents an "order by" in a SQL query expression."""
-
-    def __init__(self, field, direction='asc'):
-        """Instantiates this object with the specified attributes.
-
-        `field` is the name of the field by which to order the result set.
-
-        `direction` is either ``'asc'`` or ``'desc'``, for "ascending" and
-        "descending", respectively.
-
-        """
-        self.field = field
-        self.direction = direction
-
-    def __repr__(self):
-        """Returns a string representation of this object."""
-        return '<OrderBy {0}, {1}>'.format(self.field, self.direction)
-
-
-class GroupBy(object):
-    """Represents a "group by" in a SQL query expression."""
-
-    def __init__(self, field):
-        """Instantiates this object with the specified attributes.
-
-        `field` is the name of the field by which to group the result set.
-
-        """
-        self.field = field
-
-    def __repr__(self):
-        """Returns a string representation of this object."""
-        return '<GroupBy {0}>'.format(self.field)
-
-
 class Filter(object):
     """Represents a filter to apply to a SQL query.
 
@@ -263,91 +227,6 @@ class ConjunctionFilter(JunctionFilter):
 class DisjunctionFilter(JunctionFilter):
     def __repr__(self):
         return 'or_{0}'.format(tuple(repr(f) for f in self))
-
-
-class SearchParameters(object):
-    """Aggregates the parameters for a search, including filters, search type,
-    limit, offset, and order by directives.
-
-    """
-
-    def __init__(self, filters=None, limit=None, offset=None, order_by=None,
-                 group_by=None):
-        """Instantiates this object with the specified attributes.
-
-        `filters` is a list of :class:`Filter` objects, representing filters to
-        be applied during the search.
-
-        `limit`, if not ``None``, specifies the maximum number of results to
-        return in the search.
-
-        `offset`, if not ``None``, specifies the number of initial results to
-        skip in the result set.
-
-        `order_by` is a list of :class:`OrderBy` objects, representing the
-        ordering directives to apply to the result set that matches the
-        search.
-
-        `group_by` is a list of :class:`GroupBy` objects, representing the
-        grouping directives to apply to the result set that matches the
-        search.
-
-        """
-        self.filters = filters or []
-        self.limit = limit
-        self.offset = offset
-        self.order_by = order_by or []
-        self.group_by = group_by or []
-
-    def __repr__(self):
-        """Returns a string representation of the search parameters."""
-        template = ('<SearchParameters filters={0}, order_by={1}, limit={2},'
-                    ' group_by={3}, offset={4}, junction={5}>')
-        return template.format(self.filters, self.order_by, self.limit,
-                               self.group_by, self.offset)
-
-    @staticmethod
-    def from_dictionary(dictionary):
-        """Returns a new :class:`SearchParameters` object with arguments parsed
-        from `dictionary`.
-
-        `dictionary` is a dictionary of the form::
-
-            {
-              'filters': [{'name': 'age', 'op': 'lt', 'val': 20}, ...],
-              'order_by': [{'field': 'name', 'direction': 'desc'}, ...]
-              'group_by': [{'field': 'age'}, ...]
-              'limit': 10,
-              'offset': 3,
-            }
-
-        where
-        - ``dictionary['filters']`` is the list of :class:`Filter` objects
-          (in dictionary form),
-        - ``dictionary['order_by']`` is the list of :class:`OrderBy` objects
-          (in dictionary form),
-        - ``dictionary['group_by']`` is the list of :class:`GroupBy` objects
-          (in dictionary form),
-        - ``dictionary['limit']`` is the maximum number of matching entries to
-          return,
-        - ``dictionary['offset']`` is the number of initial entries to skip in
-          the matching result set,
-
-        The provided dictionary may have other key/value pairs, but they are
-        ignored.
-
-        """
-        # for the sake of brevity...
-        from_dict = Filter.from_dictionary
-        filters = [from_dict(f) for f in dictionary.get('filters', [])]
-        order_by_list = dictionary.get('order_by', [])
-        order_by = [OrderBy(**o) for o in order_by_list]
-        group_by_list = dictionary.get('group_by', [])
-        group_by = [GroupBy(**o) for o in group_by_list]
-        limit = dictionary.get('limit')
-        offset = dictionary.get('offset')
-        return SearchParameters(filters=filters, limit=limit, offset=offset,
-                                order_by=order_by, group_by=group_by)
 
 
 class QueryBuilder(object):
@@ -529,40 +408,7 @@ class QueryBuilder(object):
                     field = getattr(model, field_name)
                     query = query.group_by(field)
 
-        # # Apply limit and offset to the query.
-        # if search_params.limit:
-        #     query = query.limit(search_params.limit)
-        # if search_params.offset:
-        #     query = query.offset(search_params.offset)
-
         return query
-
-
-# def create_query(session, model, sort, _ignore_order_by=False):
-#     """Returns a SQLAlchemy query object on the given `model` where the search
-#     for the query is defined by `searchparams`.
-
-#     The returned query matches the set of all instances of `model` which meet
-#     the parameters of the search given by `searchparams`. For more information
-#     on search parameters, see :ref:`search`.
-
-#     `model` is a SQLAlchemy declarative model representing the database model
-#     to query.
-
-#     `searchparams` is either a dictionary (as parsed from a JSON request from
-#     the client, for example) or a :class:`SearchParameters` instance defining
-#     the parameters of the query (as returned by
-#     :func:`SearchParameters.from_dictionary`, for example).
-
-#     If `_ignore_order_by` is ``True``, no ``order_by`` method will be called on
-#     the query, regardless of whether the search parameters indicate that there
-#     should be an ``order_by``. (This is used internally by Flask-Restless to
-#     work around a limitation in SQLAlchemy.)
-
-#     """
-#     # if isinstance(searchparams, dict):
-#     #     searchparams = SearchParameters.from_dictionary(searchparams)
-#     return QueryBuilder.create_query(session, model, sort, _ignore_order_by)
 
 
 def search(session, model, filters=None, sort=None, group_by=None,

@@ -13,7 +13,6 @@ import datetime
 import inspect
 
 from dateutil.parser import parse as parse_datetime
-from sqlalchemy import Column
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import Interval
@@ -86,23 +85,6 @@ def upper_keys(d):
 
     """
     return dict(zip((k.upper() for k in d.keys()), d.values()))
-
-
-def get_columns(model):
-    """Returns a dictionary-like object containing all the columns of the
-    specified `model` class.
-
-    This includes `hybrid attributes`_.
-
-    .. _hybrid attributes: http://docs.sqlalchemy.org/en/latest/orm/extensions/hybrid.html
-
-    """
-    columns = {}
-    for superclass in model.__mro__:
-        for name, column in superclass.__dict__.items():
-            if isinstance(column, COLUMN_TYPES):
-                columns[name] = column
-    return columns
 
 
 def get_relations(model):
@@ -192,20 +174,6 @@ def get_field_type(model, fieldname):
             return None
         return prop.columns[0].type
     return None
-
-
-def assign_attributes(model, **kwargs):
-    """Assign all attributes from the supplied `kwargs` dictionary to the
-    model. This does the same thing as the default declarative constructor,
-    when provided a dictionary of attributes and values.
-
-    """
-    cls = type(model)
-    for field, value in kwargs.items():
-        if not hasattr(cls, field):
-            msg = '{0} has no field named "{1!r}"'.format(cls.__name__, field)
-            raise TypeError(msg)
-        setattr(model, field, value)
 
 
 def primary_key_names(model):
@@ -390,53 +358,6 @@ def get_by(session, model, primary_key_value, primary_key=None):
     return result.first()
 
 
-def get_or_create(session, model, attrs):
-    """Returns the single instance of `model` whose primary key has the
-    value found in `attrs`, or initializes a new instance if no primary key
-    is specified.
-
-    Before returning the new or existing instance, its attributes are
-    assigned to the values supplied in the `attrs` dictionary.
-
-    This method does not commit the changes made to the session; the
-    calling function has that responsibility.
-
-    """
-    # Not a full relation, probably just an association proxy to a scalar
-    # attribute on the remote model.
-    if not isinstance(attrs, dict):
-        return attrs
-    # Recurse into nested relationships
-    for rel in get_relations(model):
-        if rel not in attrs:
-            continue
-        if isinstance(attrs[rel], list):
-            attrs[rel] = [get_or_create(session, get_related_model(model, rel),
-                                        r) for r in attrs[rel]]
-        else:
-            attrs[rel] = get_or_create(session, get_related_model(model, rel),
-                                       attrs[rel])
-    # Find private key names
-    pk_names = primary_key_names(model)
-    attrs = strings_to_datetimes(model, attrs)
-    # If all of the primary keys were included in `attrs`, try to update
-    # an existing row.
-    if all(k in attrs for k in pk_names):
-        # Determine the sub-dictionary of `attrs` which contains the mappings
-        # for the primary keys.
-        pk_values = dict((k, v) for (k, v) in attrs.items()
-                         if k in pk_names)
-        # query for an existing row which matches all the specified
-        # primary key values.
-        instance = session_query(session, model).filter_by(**pk_values).first()
-        if instance is not None:
-            assign_attributes(instance, **attrs)
-            return instance
-    # If some of the primary keys were missing, or the row wasn't found,
-    # create a new row.
-    return model(**attrs)
-
-
 def string_to_datetime(model, fieldname, value):
     if value is None:
         return value
@@ -488,7 +409,7 @@ def strings_to_datetimes(model, dictionary):
     #             for k, v in dictionary.items() if k not in ('type', 'links')}
     #
     return dict((k, string_to_datetime(model, k, v))
-                 for k,v in dictionary.items() if k not in ('type', 'links'))
+                for k, v in dictionary.items() if k not in ('type', 'links'))
 
 
 def count(session, query):

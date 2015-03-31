@@ -402,7 +402,6 @@ class APIManager(object):
 
     def create_api_blueprint(self, model, app=None, methods=READONLY_METHODS,
                              url_prefix='/api', collection_name=None,
-                             allow_patch_many=False, allow_delete_many=False,
                              allow_functions=False, only=None, exclude=None,
                              additional_attributes=None,
                              validation_exceptions=None, page_size=10,
@@ -681,8 +680,7 @@ class APIManager(object):
                                serializer=serializer,
                                deserializer=deserializer,
                                includes=includes,
-                               allow_client_generated_ids=acgi,
-                               allow_delete_many=allow_delete_many)
+                               allow_client_generated_ids=acgi)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = APIManager._next_blueprint_name(app.blueprints,
                                                         apiname)

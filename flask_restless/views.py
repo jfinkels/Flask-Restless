@@ -40,8 +40,6 @@ from sqlalchemy.exc import DataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import ProgrammingError
-# from sqlalchemy.ext.associationproxy import AssociationProxy
-# from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.exc import FlushError
 from sqlalchemy.orm.exc import MultipleResultsFound
 from sqlalchemy.orm.exc import NoResultFound
@@ -58,17 +56,15 @@ from .helpers import get_model
 from .helpers import get_related_model
 from .helpers import has_field
 from .helpers import is_like_list
-from .helpers import partition
 from .helpers import primary_key_name
 from .helpers import primary_key_value
-from .helpers import session_query
 from .helpers import strings_to_datetimes
 from .helpers import upper_keys
 from .helpers import url_for
-# from .helpers import get_related_association_proxy_model
-# from .search import create_query
 from .search import ComparisonToNull
 from .search import search
+from .serialization import DefaultSerializer
+from .serialization import DefaultDeserializer
 from .serialization import DeserializationException
 from .serialization import SerializationException
 
@@ -251,61 +247,6 @@ def jsonify(*args, **kw):
     return response
 
 
-# This code is (lightly) adapted from the ``requests`` library, in the
-# ``requests.utils`` module. See <http://python-requests.org> for more
-# information.
-def _link_to_json(value):
-    """Returns a list representation of the specified HTTP Link header
-    information.
-
-    `value` is a string containing the link header information. If the link
-    header information (the part of after ``Link:``) looked like this::
-
-        <url1>; rel="next", <url2>; rel="foo"; bar="baz"
-
-    then this function returns a list that looks like this::
-
-        [{"url": "url1", "rel": "next"},
-         {"url": "url2", "rel": "foo", "bar": "baz"}]
-
-    This example is adapted from the documentation of GitHub's API.
-
-    """
-    links = []
-    replace_chars = " '\""
-    for val in value.split(","):
-        try:
-            url, params = val.split(";", 1)
-        except ValueError:
-            url, params = val, ''
-        link = {}
-        link["url"] = url.strip("<> '\"")
-        for param in params.split(";"):
-            try:
-                key, value = param.split("=")
-            except ValueError:
-                break
-            link[key.strip(replace_chars)] = value.strip(replace_chars)
-        links.append(link)
-    return links
-
-
-def _headers_to_json(headers):
-    """Returns a dictionary representation of the specified dictionary of HTTP
-    headers ready for use as a JSON object.
-
-    Pre-condition: headers is not ``None``.
-
-    """
-    link = headers.pop('Link', None)
-    # Shallow copy is fine here because the `headers` dictionary maps strings
-    # to strings to strings.
-    result = headers.copy()
-    if link:
-        result['Link'] = _link_to_json(link)
-    return result
-
-
 def jsonpify(*args, **kw):
     """Passes the specified arguments directly to :func:`jsonify` with a status
     code of 200, then wraps the response with the name of a JSON-P callback
@@ -343,8 +284,9 @@ def jsonpify(*args, **kw):
         # Javascript, but not valid JSON (and not a valid JSON API document).
         mimetype = 'application/javascript'
         headers['Content-Type'] = mimetype
-        # Add the headers and status code as metadata to the JSONP response.
-        meta = _headers_to_json(headers) if headers is not None else {}
+        # # Add the headers and status code as metadata to the JSONP response.
+        # meta = _headers_to_json(headers) if headers is not None else {}
+        meta = {}
         meta['status'] = status_code
         if 'meta' in document:
             document['meta'].update(meta)
@@ -365,34 +307,6 @@ def jsonpify(*args, **kw):
     return response
 
 
-def _parse_includes(column_names):
-    """Returns a pair, consisting of a list of column names to include on the
-    left and a dictionary mapping relation name to a list containing the names
-    of fields on the related model which should be included.
-
-    `column_names` must be a list of strings.
-
-    If the name of a relation appears as a key in the dictionary, then it will
-    not appear in the list.
-
-    """
-    dotted_names, columns = partition(column_names, lambda name: '.' in name)
-    # Create a dictionary mapping relation names to fields on the related
-    # model.
-    relations = defaultdict(list)
-    for name in dotted_names:
-        relation, field = name.split('.', 1)
-        # Only add the relation if it's column has been specified.
-        if relation in columns:
-            relations[relation].append(field)
-    # Included relations need only be in the relations dictionary, not the
-    # columns list.
-    for relation in relations:
-        if relation in columns:
-            columns.remove(relation)
-    return columns, relations
-
-
 def parse_sparse_fields(type_=None):
     # TODO use a regular expression to ensure field parameters are of the
     # correct format? (maybe ``field\[[^\[\]\.]*\]``)
@@ -400,34 +314,6 @@ def parse_sparse_fields(type_=None):
               for key, value in request.args.items()
               if key.startswith('fields[') and key.endswith(']')}
     return fields.get(type_) if type_ is not None else fields
-
-
-def _parse_excludes(column_names):
-    """Returns a pair, consisting of a list of column names to exclude on the
-    left and a dictionary mapping relation name to a list containing the names
-    of fields on the related model which should be excluded.
-
-    `column_names` must be a list of strings.
-
-    If the name of a relation appears in the list then it will not appear in
-    the dictionary.
-
-    """
-    dotted_names, columns = partition(column_names, lambda name: '.' in name)
-    # Create a dictionary mapping relation names to fields on the related
-    # model.
-    relations = defaultdict(list)
-    for name in dotted_names:
-        relation, field = name.split('.', 1)
-        # Only add the relation if it's column has not been specified.
-        if relation not in columns:
-            relations[relation].append(field)
-    # Relations which are to be excluded entirely need only be in the columns
-    # list, not the relations dictionary.
-    for column in columns:
-        if column in relations:
-            del relations[column]
-    return columns, relations
 
 
 # TODO these need to become JSON Pointers
@@ -575,15 +461,6 @@ class ModelView(MethodView):
         self.session = session
         self.model = model
 
-    def query(self, model=None):
-        """Returns either a SQLAlchemy query or Flask-SQLAlchemy query object
-        (depending on the type of the model) on the specified `model`, or if
-        `model` is ``None``, the model specified in the constructor of this
-        class.
-
-        """
-        return session_query(self.session, model or self.model)
-
 
 class FunctionAPI(ModelView):
     """Provides method-based dispatching for :http:method:`get` requests which
@@ -689,8 +566,7 @@ class API(APIBase):
 
     def __init__(self, session, model, page_size=10, max_page_size=100,
                  serializer=None, deserializer=None, includes=None,
-                 allow_client_generated_ids=False, allow_delete_many=False,
-                 *args, **kw):
+                 allow_client_generated_ids=False, *args, **kw):
         """Instantiates this view with the specified attributes.
 
         `session` is the SQLAlchemy session in which all database transactions
@@ -832,19 +708,9 @@ class API(APIBase):
         self.page_size = page_size
         self.max_page_size = max_page_size
         self.allow_client_generated_ids = allow_client_generated_ids
-        self.allow_delete_many = allow_delete_many
         # Use our default serializer and deserializer if none are specified.
-        if serializer is None:
-            self.serialize = self._inst_to_dict
-        else:
-            self.serialize = serializer
-        if deserializer is None:
-            self.deserialize = self._dict_to_inst
-            # # And check for our own default ValidationErrors here
-            # self.validation_exceptions = tuple(list(self.validation_exceptions)
-            #                                    + [ValidationError])
-        else:
-            self.deserialize = deserializer
+        self.serialize = serializer or DefaultSerializer()
+        self.deserialize = deserializer or DefaultDeserializer()
 
     def _search(self):
         """Defines a generic search function for the database model.
@@ -920,8 +786,8 @@ class API(APIBase):
             current_app.logger.exception(str(exception))
             detail = 'Unable to decode filter objects as JSON list'
             return error_response(400, detail=detail)
-        # TODO fix this using the below
-        #filters = [strings_to_dates(self.model, f) for f in filters]
+        # # TODO fix this using the below
+        # filters = [strings_to_dates(self.model, f) for f in filters]
 
         # # resolve date-strings as required by the model
         # for param in search_params.get('filters', list()):
@@ -990,23 +856,9 @@ class API(APIBase):
             current_app.logger.exception(str(exception))
             return error_response(400, detail='Unable to construct query')
 
-        # # create a placeholder for the relations of the returned models
-        # relations = frozenset(get_relations(self.model))
-        # # do not follow relations that will not be included in the response
-        # if self.include_columns is not None:
-        #     cols = frozenset(self.include_columns)
-        #     rels = frozenset(self.include_relations)
-        #     relations &= (cols | rels)
-        # elif self.exclude_columns is not None:
-        #     relations -= frozenset(self.exclude_columns)
-        # deep = dict((r, {}) for r in relations)
-
         # Determine the client's request for which fields to include for this
         # type of object.
         fields = parse_sparse_fields(self.collection_name)
-        # if self.collection_name in fields and self.default_fields is not None:
-        #     fields[self.collection_name] |= self.default_fields
-        #fields = fields.get(self.collection_name)
 
         # If the result of the search is a SQLAlchemy query object, we need to
         # return a collection.
@@ -1210,76 +1062,11 @@ class API(APIBase):
         if included:
             result['included'] = included
 
-        # # If no relation is requested, just return the instance. Otherwise,
-        # # get the value of the relation specified by `relationname`.
-        # if relationname is None:
-        #     # Determine the fields to include for this object.
-        #     fields_for_this = fields.get(self.collection_name)
-        #     try:
-        #         result = self.serialize(instance, only=fields_for_this)
-        #     except SerializationException as exception:
-        #         current_app.logger.exception(str(exception))
-        #         detail = 'Failed to deserialize object'
-        #         return error_response(400, detail=detail)
-        # else:
-        #     related_value = getattr(instance, relationname)
-        #     related_model = get_related_model(self.model, relationname)
-        #     # Determine fields to include for this model.
-        #     fields_for_this = fields.get(collection_name(related_model))
-        #     if relationinstid is not None:
-        #         related_value_instance = get_by(self.session, related_model,
-        #                                         relationinstid)
-        #         if related_value_instance is None:
-        #             detail = ('No relation exists with name'
-        #                       ' "{0}"').format(relationname)
-        #             return error_response(404, detail=detail)
-        #         try:
-        #             result = self.serialize(related_value_instance,
-        #                                     only=fields_for_this)
-        #         except SerializationException as exception:
-        #             current_app.logger.exception(str(exception))
-        #             detail = 'Failed to deserialize object'
-        #             return error_response(400, detail=detail)
-        #     else:
-        #         # for security purposes, don't transmit list as top-level JSON
-        #         if is_like_list(instance, relationname):
-        #             # TODO Disabled pagination for now in order to ease
-        #             # transition into JSON API compliance.
-        #             #
-        #             #     result = self._paginated(list(related_value), deep)
-        #             #
-        #             try:
-        #                 result = [self.serialize(inst, only=fields_for_this)
-        #                           for inst in related_value]
-        #             except SerializationException as exception:
-        #                 current_app.logger.exception(str(exception))
-        #                 detail = 'Failed to deserialize object'
-        #                 return error_response(400, detail=detail)
-        #         else:
-        #             try:
-        #                 result = self.serialize(related_value,
-        #                                         only=fields_for_this)
-        #             except SerializationException as exception:
-        #                 current_app.logger.exception(str(exception))
-        #                 detail = 'Failed to deserialize object'
-        #                 return error_response(400, detail=detail)
-        # if result is None:
-        #     return error_response(404)
-
         for postprocessor in self.postprocessors['GET_RESOURCE']:
             postprocessor(result=result)
         return result, 200
 
     def instances_to_include(self, instance):
-        # if isinstance(original, list):
-        #     has_links = any('links' in resource for resource in original)
-        # else:
-        #     # If the original data is an empty to-one relation, it could be
-        #     # None.
-        #     has_links = original is not None and 'links' in original
-        # if not has_links:
-        #     return {}
-
         # Add any links requested to be included by URL parameters.
         #
         # We expect `toinclude` to be a comma-separated list of relationship
@@ -1310,50 +1097,6 @@ class API(APIBase):
                     instances = set(getattr(instance, relation)
                                     for instance in instances)
             result |= set(instances)
-            # else:
-            #     if is_like_list(instance, relation):
-            #         result |= set(chain(getattr(instance, relation)
-            #                             for instance in instances))
-            #     else:
-            #         result |= set(getattr(instance, relation)
-            #                       for instance in instances)
-            # # If the primary data is a resource and not a collection, turn it
-            # # into a list anyway.
-            # if not isinstance(original, list):
-            #     original = [original]
-            # for resource in original:
-            #     # If the resource has a link with the name specified in
-            #     # `toinclude`, then get the type and IDs of that link.
-            #     if link in resource['links']:
-            #         link_data = resource['links'][link]['linkage']
-            #         # If the link is a to-one relation, turn it into a list
-            #         # anyway.
-            #         if not isinstance(link_data, list):
-            #             link_data = [link_data]
-            #         for link_object in link_data:
-            #             link_type = link_object['type']
-            #             link_id = link_object['id']
-            #             ids_to_link[link_type].add(link_id)
-            #         # else:
-            #         #     link_type = link_data['type']
-            #         #     link_id = link_data['id']
-            #         #     ids_to_link[link_type].add(link_id)
-            # # Otherwise, if there is just a single instance, look through
-            # # the links to get the IDs of the linked instances.
-            # else:
-            #     # If the resource has a link with the name specified in
-            #     # `toinclude`, then get the type and IDs of that link.
-            #     if link in original['links']:
-            #         link_data = original['links'][link]['linkage']
-            #         if isinstance(link_data, list):
-            #             for link_object in link_data:
-            #                 link_type = link_object['type']
-            #                 link_id = link_object['id']
-            #                 ids_to_link[link_type].add(link_id)
-            #         else:
-            #             link_type = link_data['type']
-            #             link_id = link_data['id']
-            #             ids_to_link[link_type].add(link_id)
         return result
 
     def get(self, instid, relationname, relationinstid):
@@ -1381,65 +1124,6 @@ class API(APIBase):
             relationname = relationinstid
             relationinstid = None
         return self._get_single(instid, relationname, relationinstid)
-
-    def _delete_many(self):
-        """Deletes multiple instances of the model.
-
-        If search parameters are provided via the ``q`` query parameter, only
-        those instances matching the search parameters will be deleted.
-
-        If no instances were deleted, this returns a
-        :http:status:`404`. Otherwise, it returns a :http:status:`200` with the
-        number of deleted instances in the body of the response.
-
-        """
-        # try to get search query from the request query parameters
-        try:
-            filters = json.loads(request.args.get('filter[objects]', '[]'))
-        except (TypeError, ValueError, OverflowError) as exception:
-            current_app.logger.exception(str(exception))
-            return error_response(400, detail='Unable to decode search query')
-
-        for preprocessor in self.preprocessors['DELETE_COLLECTION']:
-            preprocessor(filters=filters)
-
-        # perform a filtered search
-        try:
-            # HACK We need to ignore any ``order_by`` request from the client,
-            # because for some reason, SQLAlchemy does not allow calling
-            # delete() on a query that has an ``order_by()`` on it. If you
-            # attempt to call delete(), you get this error:
-            #
-            #     sqlalchemy.exc.InvalidRequestError: Can't call Query.delete()
-            #     when order_by() has been called
-            #
-            result = search(self.session, self.model, filters,
-                            _ignore_order_by=True)
-        except NoResultFound:
-            return error_response(404, detail='No result found')
-        except MultipleResultsFound:
-            return error_response(404, detail='Multiple results found')
-        except Exception as exception:
-            current_app.logger.exception(str(exception))
-            return error_response(400, detail='Unable to construct query')
-
-        # for security purposes, don't transmit list as top-level JSON
-        if isinstance(result, Query):
-            # Implementation note: `synchronize_session=False`, described in
-            # the SQLAlchemy documentation for
-            # :meth:`sqlalchemy.orm.query.Query.delete`, states that this is
-            # the most efficient option for bulk deletion, and is reliable once
-            # the session has expired, which occurs after the session commit
-            # below.
-            num_deleted = result.delete(synchronize_session=False)
-        else:
-            self.session.delete(result)
-            num_deleted = 1
-        self.session.commit()
-        for postprocessor in self.postprocessors['DELETE_COLLECTION']:
-            postprocessor(num_deleted=num_deleted)
-        result = dict(meta=dict(total=num_deleted))
-        return result, 200
 
     def delete(self, instid, relationname, relationinstid):
         """Removes the specified instance of the model with the specified name
@@ -1470,10 +1154,8 @@ class API(APIBase):
         # If no instance ID is provided, this request is an attempt to delete
         # many instances of the model, possibly filtered.
         if instid is None:
-            if not self.allow_delete_many:
-                detail = 'Server does not allow deleting from a collection'
-                return error_response(405, detail=detail)
-            return self._delete_many()
+            detail = 'Server does not allow deleting from a collection'
+            return error_response(405, detail=detail)
         for preprocessor in self.preprocessors['DELETE_RESOURCE']:
             temp_result = preprocessor(instance_id=instid,
                                        relation_name=relationname,
@@ -1493,14 +1175,6 @@ class API(APIBase):
             if relationinstid is not None:
                 related_model = get_related_model(self.model, relationname)
                 relation = getattr(inst, relationname)
-                # if ',' in relationinstid:
-                #     ids = relationinstid.split(',')
-                # else:
-                #     ids = [relationinstid]
-                # toremove = (get_by(self.session, related_model, id_) for id_ in
-                #             ids)
-                # for obj in toremove:
-                #     relation.remove(obj)
                 toremove = get_by(self.session, related_model, relationinstid)
                 relation.remove(toremove)
             else:
@@ -1532,41 +1206,6 @@ class API(APIBase):
             detail = 'There was no instance to delete.'
             return error_response(404, detail=detail)
         return {}, 204
-
-    # def _create_single(self, data):
-    #     # Getting the list of relations that will be added later
-    #     cols = get_columns(self.model)
-    #     relations = set(get_relations(self.model))
-    #     # Looking for what we're going to set on the model right now
-    #     colkeys = set(cols.keys())
-    #     fields = set(data.keys())
-    #     props = (colkeys & fields) - relations
-    #     # Instantiate the model with the parameters.
-    #     modelargs = dict([(i, data[i]) for i in props])
-    #     instance = self.model(**modelargs)
-    #     # Handling relations, a single level is allowed
-    #     for col in relations & fields:
-    #         submodel = get_related_model(self.model, col)
-
-    #         if type(data[col]) == list:
-    #             # model has several related objects
-    #             for subparams in data[col]:
-    #                 subinst = get_or_create(self.session, submodel,
-    #                                         subparams)
-    #                 try:
-    #                     getattr(instance, col).append(subinst)
-    #                 except AttributeError:
-    #                     attribute = getattr(instance, col)
-    #                     attribute[subinst.key] = subinst.value
-    #         else:
-    #             # model has single related object
-    #             subinst = get_or_create(self.session, submodel,
-    #                                     data[col])
-    #             setattr(instance, col, subinst)
-
-    #     # add the created model to the session
-    #     self.session.add(instance)
-    #     return instance
 
     def post(self, instid, relationname, relationinstid):
         """Creates a new instance of a given model based on request data.
@@ -1604,50 +1243,6 @@ class API(APIBase):
         # apply any preprocessors to the POST arguments
         for preprocessor in self.preprocessors['POST']:
             preprocessor(data=data)
-            # # Get the instance on which to set the relationship info.
-            # instance = get_by(self.session, self.model, instid)
-            # # If no such relation exists, return an error to the client.
-            # if not hasattr(instance, relationname):
-            #     detail = 'No such link: {0}'.format(relationname)
-            #     return error_response(404, detail=detail)
-            # related_model = get_related_model(self.model, relationname)
-            # relation = getattr(instance, relationname)
-            # # If it is -to-many relation, add to the existing list.
-            # if is_like_list(instance, relationname):
-            #     related_id = data.pop(relationname)
-            #     if isinstance(related_id, list):
-            #         related_instances = [get_by(self.session, related_model,
-            #                                     d) for d in related_id]
-            #     else:
-            #         related_instances = [get_by(self.session, related_model,
-            #                                     related_id)]
-            #     relation.extend(related_instances)
-            # # Otherwise it is a -to-one relation.
-            # else:
-            #     # If there is already something there, return an error.
-            #     if relation is not None:
-            #         detail = ('Cannot POST to a -to-one relationship that'
-            #                   ' already has a linked instance (with ID'
-            #                   ' {0})').format(relationinstid)
-            #         return error_response(400, detail=detail)
-            #     # Get the ID of the related model to which to set the link.
-            #     #
-            #     # TODO I don't know the collection name for the linked objects,
-            #     # so I can't provide a correctly named mapping here.
-            #     #
-            #     # related_id = data[collection_name(related_model)]
-            #     related_id = data.popitem()[1]
-            #     related_instance = get_by(self.session, related_model,
-            #                               related_id)
-            #     try:
-            #         setattr(instance, relationname, related_instance)
-            #     except self.validation_exceptions as exception:
-            #         current_app.logger.exception(str(exception))
-            #         return self._handle_validation_exception(exception)
-            # result = {}
-            # status = 204
-            # headers = {}
-        # else:
         if 'data' not in data:
             detail = 'Resource must have a "data" key'
             return error_response(400, detail=detail)
@@ -1798,14 +1393,6 @@ class API(APIBase):
                 detail = "Model does not have field '{0}'".format(field)
                 return error_response(400, detail=detail)
 
-        # if putmany:
-        #     try:
-        #         # create a SQLALchemy Query from the query parameter `q`
-        #         query = create_query(self.session, self.model, search_params)
-        #     except Exception as exception:
-        #         current_app.logger.exception(str(exception))
-        #         return dict(message='Unable to construct query'), 400
-        # else:
         for link, value in data.pop('links', {}).items():
             related_model = get_related_model(self.model, link)
             related_instance = get_by(self.session, related_model, value)
@@ -1922,20 +1509,6 @@ class API(APIBase):
             if id_ != instid:
                 message = 'ID must be {0}, not {1}'.format(instid, id_)
                 return error_response(409, detail=message)
-            # If we are attempting to update multiple objects.
-            # if isinstance(data, list):
-            #     # Check that the IDs specified in the body of the request
-            #     # match the IDs specified in the URL.
-            #     if not all('id' in d and str(d['id']) in ids for d in data):
-            #         msg = 'IDs in body of request must match IDs in URL'
-            #         return dict(message=msg), 400
-            #     for newdata in data:
-            #         instance = get_by(self.session, self.model,
-            #                           newdata['id'], self.primary_key)
-            #         self._update_single(instance, newdata)
-            # else:
-            # instance = get_by(self.session, self.model, instid,
-            #                   self.primary_key)
             result = self._update_single(instance, data)
             # If result is not None, that means there was an error updating the
             # resource.
