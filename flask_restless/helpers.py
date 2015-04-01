@@ -357,13 +357,17 @@ def to_dict(instance, deep=None, exclude=None, include=None,
     # recursively call _to_dict on each of the `deep` relations
     deep = deep or {}
 
+    all_excludes = exclude or []
+    all_excludes.extend(list(exclude_relations) if exclude_relations else [])
+
+    all_includes = include or []
+    all_includes.extend(list(include_methods) if include_methods else [])
+    all_includes.extend(list(include_relations) if include_relations else [])
+
     for relation, rdeep in deep.items():
         if (
-            (exclude and relation in exclude)
-            or (exclude_relations and relation in exclude_relations)
-            or (include and relation not in include)
-            or (include_methods and relation not in include_methods)
-            or (include_relations and relation not in include_relations)
+            (all_excludes and relation in all_excludes)
+            or (all_includes and relation not in all_includes)
         ):
             continue
 
