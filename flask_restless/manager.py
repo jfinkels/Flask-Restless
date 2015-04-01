@@ -131,6 +131,8 @@ class APIManager(object):
         #: the corresponding collection names for those models.
         self.created_apis_for = {}
 
+        self._created_apis = {}
+
         # Stash this instance so that it can be examined later by other
         # functions in this module.
         url_for.created_managers.append(self)
@@ -590,7 +592,7 @@ class APIManager(object):
                                results_per_page, max_results_per_page,
                                post_form_preprocessor, preprocessors_,
                                postprocessors_, primary_key, serializer,
-                               deserializer)
+                               deserializer, manager=self)
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = APIManager._next_blueprint_name(app.blueprints,
                                                         apiname)
