@@ -663,16 +663,20 @@ class TestAssociationProxy(ManagerTestBase):
         self.manager.create_api(self.Article, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = {'data':
-                    {'type': 'article',
-                     'id': '1',
-                     'links':
-                         {'tags':
-                              [{'type': 'tag', 'id': '1'},
-                               {'type': 'tag', 'id': '2'}]
-                          }
-                     }
+        data = {
+            'data': {
+                'type': 'article',
+                'id': '1',
+                'links': {
+                    'tags': {
+                        'linkage': [
+                            {'type': 'tag', 'id': '1'},
+                            {'type': 'tag', 'id': '2'}
+                        ]
+                    }
                 }
+            }
+        }
         response = self.app.patch('/api2/article/1', data=dumps(data))
         assert response.status_code == 204
         assert [tag1, tag2] == sorted(article.tags, key=lambda t: t.id)
@@ -713,14 +717,17 @@ class TestAssociationProxy(ManagerTestBase):
         self.manager.create_api(self.Article, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = {'data':
-                    {'type': 'article',
-                     'id': '1',
-                     'links':
-                         {'tags':
-                              [{'type': 'tag', 'id': '1', 'extrainfo': 'foo'}]}
-                     }
+        data = {
+            'data': {
+                'type': 'article',
+                'id': '1',
+                'links': {
+                    'tags': {
+                        'linkage': [{'type': 'tag', 'id': '1', 'extrainfo': 'foo'}]
+                    }
                 }
+            }
+        }
         response = self.app.patch('/api2/article/1', data=dumps(data))
         assert response.status_code == 204
         assert article.tags == [tag]
