@@ -1342,9 +1342,6 @@ class API(APIBase):
             if link is None:
                 setattr(instance, linkname, None)
                 continue
-            # TODO check for conflicting or missing types here
-            # type_ = link['type']
-
             # If this is a to-many relationship, get all the related
             # resources.
             if isinstance(link, list):
@@ -1353,27 +1350,45 @@ class API(APIBase):
                 if not self.allow_to_many_replacement:
                     message = 'Not allowed to replace a to-many relationship'
                     return error_response(403, detail=message)
-                newvalue = [get_by(self.session, related_model, rel['id'])
-                            for rel in link]
+                newvalue = {}
+                notfound = []
+                for rel in link:
+                    # TODO check for conflicting or missing types here
+                    # type_ = link['type']
+                    inst = get_by(self.session, related_model, rel['id'])
+                    if inst is None:
+                        notfound.append((rel['id'], rel['type']))
+                    else:
+                        newvalue[inst] = dict((k, v) for k, v in rel.items()
+                                              if k not in ('type', 'id'))
+                    # If the to-one relationship resource or any of the to-many
+                    # relationship resources do not exist, return an error
+                    # response.
+                    if notfound:
+                        msg = 'No object of type {0} found with ID {1}'
+                        errors = [error(detail=msg.format(type_, id_))
+                                  for type_, id_ in not_found]
+                        return errors_response(404, errors)
             # Otherwise, it is a to-one relationship, so just get the single
             # related resource.
             else:
-                newvalue = get_by(self.session, related_model, link['id'])
-            # If the to-one relationship resource or any of the to-many
-            # relationship resources do not exist, return an error response.
-            if newvalue is None:
-                detail = ('No object of type {0} found'
-                          ' with ID {1}').format(link['type'], link['id'])
-                return error_response(404, detail=detail)
-            elif isinstance(newvalue, list) and any(value is None
-                                                    for value in newvalue):
-                not_found = (rel for rel, value in zip(link, newvalue)
-                             if value is None)
-                msg = 'No object of type {0} found with ID {1}'
-                errors = [error(detail=msg.format(rel['type'], rel['id']))
-                          for rel in not_found]
-                return errors_response(404, errors)
+                # TODO check for conflicting or missing types here
+                # type_ = link['type']
+                inst = get_by(self.session, related_model, link['id'])
+                # If the to-one relationship resource does not exist, return an
+                # error response.
+                if inst is None:
+                    detail = ('No object of type {0} found'
+                              ' with ID {1}').format(link['type'], link['id'])
+                    return error_response(404, detail=detail)
+                newvalue = {inst: dict((k, v) for k, v in rel.items()
+                                       if k not in ('type', 'id'))}
+            # Set the new value of the relationship.
             try:
+                # TODO Here if there are any extra attributes in
+                # newvalue[inst], (1) get the secondary association object for
+                # that relation, then (2) set the extra attributes on that
+                # object.
                 setattr(instance, linkname, newvalue)
             except self.validation_exceptions as exception:
                 current_app.logger.exception(str(exception))

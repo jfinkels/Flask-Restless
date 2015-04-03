@@ -622,6 +622,9 @@ class TestAssociationProxy(ManagerTestBase):
             article = relationship(Article, backref=backref('articletags'))
             tag_id = Column(Integer, ForeignKey('tag.id'), primary_key=True)
             tag = relationship('Tag')
+            # This is extra information that only appears in this association
+            # object.
+            extrainfo = Column(Unicode)
             # TODO this dummy column is required to create an API for this
             # object.
             id = Column(Integer)
@@ -631,45 +634,11 @@ class TestAssociationProxy(ManagerTestBase):
             id = Column(Integer, primary_key=True)
             name = Column(Unicode)
 
-        # The code for the following three classes comes from the SQLAlchemy
-        # documentation
-        # http://docs.sqlalchemy.org/en/rel_0_9/orm/extensions/associationproxy.html#proxying-to-dictionary-based-collections
-        usercreator = lambda k, v: UserKeyword(special_key=k, keyword=v)
-
-        class User(self.Base):
-            __tablename__ = 'user'
-            id = Column(Integer, primary_key=True)
-            keywords = association_proxy('user_keywords', 'keyword',
-                                         creator=usercreator)
-
-        # user_keywords = backref('user_keywords',
-        #                         collection_class=amc('special_key'),
-        #                         cascade='all, delete-orphan')
-        user_keywords = backref('user_keywords',
-                                collection_class=amc('special_key'))
-
-        class UserKeyword(self.Base):
-            __tablename__ = 'user_keyword'
-            special_key = Column(Unicode)
-            user_id = Column(Integer, ForeignKey('user.id'), primary_key=True)
-            user = relationship(User, backref=user_keywords)
-            keyword_id = Column(Integer, ForeignKey('keyword.id'),
-                                primary_key=True)
-            keyword = relationship('Keyword')
-            # TODO this dummy column is required to create an API for this
-            # object.
-            id = Column(Integer)
-
-        class Keyword(self.Base):
-            __tablename__ = 'keyword'
-            id = Column(Integer, primary_key=True)
-            keyword = Column(Unicode)
-
         self.Article = Article
+        self.ArticleTag = ArticleTag
         self.Tag = Tag
         self.Base.metadata.create_all()
         self.manager.create_api(Article, methods=['PATCH'])
-        self.manager.create_api(User, methods=['PATCH'])
         # HACK Need to create APIs for these other models because otherwise
         # we're not able to create the link URLs to them.
         #
@@ -677,8 +646,6 @@ class TestAssociationProxy(ManagerTestBase):
         # which no API has been made.
         self.manager.create_api(Tag)
         self.manager.create_api(ArticleTag)
-        self.manager.create_api(UserKeyword)
-        self.manager.create_api(Keyword)
 
     def test_update(self):
         """Test for updating a model with a many-to-many relation that uses an
@@ -732,59 +699,70 @@ class TestAssociationProxy(ManagerTestBase):
         """Tests for updating a dictionary based collection."""
         assert False, 'Not implemented'
 
-    # # TODO This test should be modified to make a PATCH request on a
-    # # relationship URL.
-    #
-    # def test_patch_remove_m2m(self):
-    #     """Test for removing a relation on a model that uses an association
-    #     object to allow extra data to be stored in the helper table.
+    def test_extra_info(self):
+        """Tests for adding a link in a to-many relationship with some extra
+        information to be stored in the association object.
 
-    #     For more information, see issue #166.
+        For more information, see issue #166.
 
-    #     """
-    #     response = self.app.post('/api/computer', data=dumps({}))
-    #     assert 201 == response.status_code
-    #     vim = self.Program(name=u'Vim')
-    #     emacs = self.Program(name=u'Emacs')
-    #     self.session.add_all([vim, emacs])
-    #     self.session.commit()
-    #     data = {
-    #         'programs': [
-    #             {
-    #                 'program_id': 1,
-    #                 'licensed': False
-    #             },
-    #             {
-    #                 'program_id': 2,
-    #                 'licensed': True
-    #             }
-    #         ]
-    #     }
-    #     response = self.app.patch('/api/computer/1', data=dumps(data))
-    #     computer = loads(response.data)
-    #     assert 200 == response.status_code
-    #     vim_relation = {
-    #         'computer_id': 1,
-    #         'program_id': 1,
-    #         'licensed': False
-    #     }
-    #     emacs_relation = {
-    #         'computer_id': 1,
-    #         'program_id': 2,
-    #         'licensed': True
-    #     }
-    #     assert vim_relation in computer['programs']
-    #     assert emacs_relation in computer['programs']
-    #     data = {
-    #         'programs': {
-    #             'remove': [{'program_id': 1}]
-    #         }
-    #     }
-    #     response = self.app.patch('/api/computer/1', data=dumps(data))
-    #     computer = loads(response.data)
-    #     assert 200 == response.status_code
-    #     assert vim_relation not in computer['programs']
-    #     assert emacs_relation in computer['programs']
+        """
+        article = self.Article(id=1)
+        tag = self.Tag(id=1)
+        self.session.add_all([article, tag])
+        self.session.commit()
+        self.manager.create_api(self.Article, methods=['PATCH'],
+                                url_prefix='/api2',
+                                allow_to_many_replacement=True)
+        data = {'data':
+                    {'type': 'article',
+                     'id': '1',
+                     'links':
+                         {'tags':
+                              [{'type': 'tag', 'id': '1', 'extrainfo': 'foo'}]}
+                     }
+                }
+        response = self.app.patch('/api2/article/1', data=dumps(data))
+        assert response.status_code == 204
+        assert article.tags == [tag]
+        assert self.session.query(self.ArticleTag).first().extrainfo == 'foo'
+
+    def test_extra_info_patch_relationship_url(self):
+        """Tests for replacing links in a to-many relationship with some extra
+        information to be stored in the association object when making a
+        request to a relationship URL.
+
+        For more information, see issue #166.
+
+        """
+        article = self.Article(id=1)
+        tag = self.Tag(id=1)
+        self.session.add_all([article, tag])
+        self.session.commit()
+        data = dict(data=[dict(type='tag', id='1', extrainfo='foo')])
+        data = dumps(data)
+        response = self.app.patch('/api/article/1/links/tags', data=data)
+        assert response.status_code == 204
+        assert article.tags == [tag]
+        assert self.session.query(self.ArticleTag).first().extrainfo == 'foo'
+
+    def test_extra_info_post_relationship_url(self):
+        """Tests for adding a link in a to-many relationship with some extra
+        information to be stored in the association object when making a
+        request to a relationship URL.
+
+        For more information, see issue #166.
+
+        """
+        article = self.Article(id=1)
+        tag = self.Tag(id=1)
+        self.session.add_all([article, tag])
+        self.session.commit()
+        data = dict(data=[dict(type='tag', id='1', extrainfo='foo')])
+        data = dumps(data)
+        response = self.app.post('/api/article/1/links/tags', data=data)
+        assert response.status_code == 204
+        assert article.tags == [tag]
+        assert self.session.query(self.ArticleTag).first().extrainfo == 'foo'
 
 
 @skip_unless(has_flask_sqlalchemy, 'Flask-SQLAlchemy not found.')
