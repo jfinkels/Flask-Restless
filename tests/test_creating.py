@@ -611,16 +611,18 @@ class TestAssociationProxy(ManagerTestBase):
         as a list attribute instead of a link object.
 
         """
-        tag1 = self.Tag(name='foo')
-        tag2 = self.Tag(name='bar')
-        self.session.add_all([tag1, tag2])
-        self.session.commit()
-        data = dict(data=dict(type='article', tag_names=['foo', 'bar']))
-        response = self.app.post('/api/article', data=dumps(data))
-        assert response.status_code == 201
-        document = loads(response.data)
-        article = document['data']
-        assert ['foo', 'bar'] == article['tag_names']
+        # tag1 = self.Tag(name='foo')
+        # tag2 = self.Tag(name='bar')
+        # self.session.add_all([tag1, tag2])
+        # self.session.commit()
+        # data = dict(data=dict(type='article', tag_names=['foo', 'bar']))
+        # response = self.app.post('/api/article', data=dumps(data))
+        # print(loads(response.data))
+        # assert response.status_code == 201
+        # document = loads(response.data)
+        # article = document['data']
+        # assert ['foo', 'bar'] == article['tag_names']
+        assert False, 'Not implemented'
 
     def test_dictionary_collection(self):
         """Tests for creating a resource with a dictionary based collection via
