@@ -1355,8 +1355,10 @@ class API(APIBase):
                 if not self.allow_to_many_replacement:
                     message = 'Not allowed to replace a to-many relationship'
                     return error_response(403, detail=message)
-                newvalue = {}
+                # If this is left empty, the relationship will be zeroed.
+                newvalue = []
                 notfound = []
+
                 for rel in linkage:
                     # TODO check for conflicting or missing types here
                     # type_ = link['type']
@@ -1364,15 +1366,14 @@ class API(APIBase):
                     if inst is None:
                         notfound.append((rel['id'], rel['type']))
                     else:
-                        newvalue[inst] = dict((k, v) for k, v in rel.items()
-                                              if k not in ('type', 'id'))
+                        newvalue.append(inst)
                     # If the to-one relationship resource or any of the to-many
                     # relationship resources do not exist, return an error
                     # response.
                     if notfound:
                         msg = 'No object of type {0} found with ID {1}'
                         errors = [error(detail=msg.format(type_, id_))
-                                  for type_, id_ in not_found]
+                                  for type_, id_ in notfound]
                         return errors_response(404, errors)
             # Otherwise, it is a to-one relationship, so just get the single
             # related resource.
@@ -1386,8 +1387,7 @@ class API(APIBase):
                     detail = ('No object of type {0} found'
                               ' with ID {1}').format(linkage['type'], link['id'])
                     return error_response(404, detail=detail)
-                newvalue = {inst: dict((k, v) for k, v in rel.items()
-                                       if k not in ('type', 'id'))}
+                newvalue = inst
             # Set the new value of the relationship.
             try:
                 # TODO Here if there are any extra attributes in
