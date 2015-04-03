@@ -708,24 +708,25 @@ class TestAssociationProxy(ManagerTestBase):
                 }
         response = self.app.patch('/api2/article/1', data=dumps(data))
         assert response.status_code == 204
-        assert set(article.tags) == set((tag1, tag2))
+        assert [tag1, tag2] == sorted(article.tags, key=lambda t: t.id)
 
     def test_scalar(self):
         """Tests for updating an association proxy to scalars as a list
         attribute instead of a link object.
 
         """
-        article = self.Article(id=1)
-        tag1 = self.Tag(name='foo')
-        tag2 = self.Tag(name='bar')
-        article.tags = [tag1, tag2]
-        self.session.add_all([article, tag1, tag2])
-        self.session.commit()
-        tag_names = ['foo', 'bar']
-        data = dict(data=dict(type='article', id='1', tag_names=tag_names))
-        response = self.app.patch('/api/article/1', data=dumps(data))
-        assert response.status_code == 204
-        assert ['foo', 'bar'] == article.tag_names
+        # article = self.Article(id=1)
+        # tag1 = self.Tag(name='foo')
+        # tag2 = self.Tag(name='bar')
+        # article.tags = [tag1, tag2]
+        # self.session.add_all([article, tag1, tag2])
+        # self.session.commit()
+        # tag_names = ['foo', 'bar']
+        # data = dict(data=dict(type='article', id='1', tag_names=tag_names))
+        # response = self.app.patch('/api/article/1', data=dumps(data))
+        # assert response.status_code == 204
+        # assert ['foo', 'bar'] == article.tag_names
+        assert False, 'Not implemented'
 
     def test_dictionary_collection(self):
         """Tests for updating a dictionary based collection."""
