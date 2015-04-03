@@ -1598,15 +1598,17 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add_all([person1, person2, article])
         self.session.commit()
         # Change the author of the article from person 1 to person 2.
-        data = {'data':
-                    {'type': 'article',
-                     'id': '1',
-                     'links':
-                         {'author':
-                              {'type': 'person', 'id': '2'}
-                          }
-                     }
+        data = {
+            'data': {
+                'type': 'article',
+                'id': '1',
+                'links': {
+                    'author': {
+                        'linkage': {'type': 'person', 'id': '2'}
+                    }
                 }
+            }
+        }
         response = self.app.patch('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert article.author is person2
@@ -1626,13 +1628,13 @@ class TestUpdatingResources(ManagerTestBase):
         self.session.add_all([person, article])
         self.session.commit()
         # Change the author of the article to None.
-        data = {'data':
-                    {'type': 'article',
-                     'id': '1',
-                     'links':
-                         {'author': None}
-                     }
-                }
+        data = {
+            'data': {
+                'type': 'article',
+                'id': '1',
+                'links': {'author': {'linkage': None}}
+            }
+        }
         response = self.app.patch('/api/article/1', data=dumps(data))
         assert response.status_code == 204
         assert article.author is None
@@ -1654,15 +1656,20 @@ class TestUpdatingResources(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = {'data':
-                    {'type': 'person',
-                     'id': '1',
-                     'links':
-                         {'articles': [{'type': 'article', 'id': '1'},
-                                       {'type': 'article', 'id': '2'}]
-                          }
-                     }
+        data = {
+            'data': {
+                'type': 'person',
+                'id': '1',
+                'links': {
+                    'articles': {
+                        'linkage': [
+                            {'type': 'article', 'id': '1'},
+                            {'type': 'article', 'id': '2'}
+                        ]
+                    }
                 }
+            }
+        }
         response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 204
         assert set(person.articles) == {article1, article2}
@@ -1685,12 +1692,17 @@ class TestUpdatingResources(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = {'data':
-                    {'type': 'person',
-                     'id': '1',
-                     'links': {'articles': []}
-                     }
+        data = {
+            'data': {
+                'type': 'person',
+                'id': '1',
+                'links': {
+                    'articles': {
+                        'linkage': []
+                    }
                 }
+            }
+        }
         response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 204
         assert person.articles == []
@@ -1709,12 +1721,13 @@ class TestUpdatingResources(ManagerTestBase):
         person = self.Person(id=1)
         self.session.add(person)
         self.session.commit()
-        data = {'data':
-                    {'type': 'person',
-                     'id': '1',
-                     'links': {'articles': []}
-                     }
-                }
+        data = {
+            'data': {
+                'type': 'person',
+                'id': '1',
+                'links': {'articles': {'linkage': []}}
+            }
+        }
         response = self.app.patch('/api/person/1', data=dumps(data))
         assert response.status_code == 403
 
@@ -1772,12 +1785,15 @@ class TestUpdatingResources(ManagerTestBase):
         self.manager.create_api(self.Person, methods=['PATCH'],
                                 url_prefix='/api2',
                                 allow_to_many_replacement=True)
-        data = {'data':
-                    {'type': 'person',
-                     'id': '1',
-                     'links': {'articles': [{'type': 'article', 'id': '1'}]}
-                     }
+        data = {
+            'data': {
+                'type': 'person',
+                'id': '1',
+                'links': {
+                    'articles': {'linkage': [{'type': 'article', 'id': '1'}]}
                 }
+            }
+        }
         response = self.app.patch('/api2/person/1', data=dumps(data))
         assert response.status_code == 404
         # TODO test for error details

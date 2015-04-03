@@ -1336,53 +1336,58 @@ class API(APIBase):
         # Update any relationships.
         links = data.pop('links', {})
         for linkname, link in links.items():
+            # TODO: The client is obligated by JSON API to provide linkage if
+            # the `links` attribute exists, but we should probably error out
+            # in a more constructive way if it's missing.
+            linkage = link['linkage']
+
             related_model = get_related_model(self.model, linkname)
             # If the client provided "null" for this relation, remove it by
             # setting the attribute to ``None``.
-            if link is None:
+            if linkage is None:
                 setattr(instance, linkname, None)
                 continue
             # If this is a to-many relationship, get all the related
             # resources.
-            if isinstance(link, list):
+            if isinstance(linkage, list):
                 # Replacement of a to-many relationship may have been disabled
                 # by the user.
                 if not self.allow_to_many_replacement:
                     message = 'Not allowed to replace a to-many relationship'
                     return error_response(403, detail=message)
-                newvalue = {}
+                # If this is left empty, the relationship will be zeroed.
+                newvalue = []
                 notfound = []
-                for rel in link:
+
+                for rel in linkage:
                     # TODO check for conflicting or missing types here
                     # type_ = link['type']
                     inst = get_by(self.session, related_model, rel['id'])
                     if inst is None:
                         notfound.append((rel['id'], rel['type']))
                     else:
-                        newvalue[inst] = dict((k, v) for k, v in rel.items()
-                                              if k not in ('type', 'id'))
+                        newvalue.append(inst)
                     # If the to-one relationship resource or any of the to-many
                     # relationship resources do not exist, return an error
                     # response.
                     if notfound:
                         msg = 'No object of type {0} found with ID {1}'
                         errors = [error(detail=msg.format(type_, id_))
-                                  for type_, id_ in not_found]
+                                  for type_, id_ in notfound]
                         return errors_response(404, errors)
             # Otherwise, it is a to-one relationship, so just get the single
             # related resource.
             else:
                 # TODO check for conflicting or missing types here
                 # type_ = link['type']
-                inst = get_by(self.session, related_model, link['id'])
+                inst = get_by(self.session, related_model, linkage['id'])
                 # If the to-one relationship resource does not exist, return an
                 # error response.
                 if inst is None:
                     detail = ('No object of type {0} found'
-                              ' with ID {1}').format(link['type'], link['id'])
+                              ' with ID {1}').format(linkage['type'], link['id'])
                     return error_response(404, detail=detail)
-                newvalue = {inst: dict((k, v) for k, v in rel.items()
-                                       if k not in ('type', 'id'))}
+                newvalue = inst
             # Set the new value of the relationship.
             try:
                 # TODO Here if there are any extra attributes in
