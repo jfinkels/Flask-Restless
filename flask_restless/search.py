@@ -105,8 +105,15 @@ OPERATORS = {
     # Operators which accept three arguments.
     'has': lambda f, a, fn: f.has(_sub_operator(f, a, fn)),
     'any': lambda f, a, fn: f.any(_sub_operator(f, a, fn)),
+    # SQLalchemy supports a wide variety of other operators
+    # through the .op() method. These are supported by sqlalchemy.
+    # these are just a few that PostgreSQL supports for network types:
+    '<<=': lambda f, a: f.op('<<=')(a),
+    '>>=': lambda f, a: f.op('>>=')(a),
+    '<<': lambda f, a: f.op('<<')(a),
+    '>>': lambda f, a: f.op('>>')(a),
+    '<>': lambda f, a: f.op('<>')(a),
 }
-
 
 class OrderBy(object):
     """Represents an "order by" in a SQL query expression."""
