@@ -11,6 +11,8 @@
 """
 from datetime import date
 from datetime import datetime
+from datetime import time
+from dateutil.tz import tzoffset
 import uuid
 
 from nose.tools import assert_raises
@@ -135,6 +137,27 @@ class TestModelHelpers(TestSupport):
         d = to_dict(computer)
         assert 'buy_date' in d
         assert d['buy_date'] == computer.buy_date.isoformat()
+
+    def test_time_serialization(self):
+        """Tests that time objects in the database are correctly serialized
+        in the :func:`flask.ext.restless.helpers.to_dict` function.
+        """
+        user = self.User(wakeup=time(8, 15, 0, 0))
+        self.session.commit()
+        d = to_dict(user)
+        assert 'wakeup' in d
+        assert d['wakeup'] == user.wakeup.isoformat()
+
+    def test_time_tz_serialization(self):
+        """Tests that time objects with a timezone in the database are correctly
+        serialized in the :func:`flask.ext.restless.helpers.to_dict` function.
+        """
+        satellite = self.Satellite(
+            launch_time=time(12, 30, 0, 0, tzoffset('GFT', -3*60*60)))
+        self.session.commit()
+        d = to_dict(satellite)
+        assert 'launch_time' in d
+        assert d['launch_time'] == satellite.launch_time.isoformat()
 
     def test_uuid(self):
         """Tests for correct serialization of UUID objects."""

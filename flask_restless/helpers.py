@@ -17,6 +17,7 @@ from dateutil.parser import parse as parse_datetime
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import Interval
+from sqlalchemy import Time
 from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.associationproxy import AssociationProxy
@@ -176,14 +177,15 @@ def get_field_type(model, fieldname):
     return fieldtype
 
 
-def is_date_field(model, fieldname):
+def is_date_or_time_field(model, fieldname):
     """Returns ``True`` if and only if the field of `model` with the specified
     name corresponds to either a :class:`datetime.date` object or a
     :class:`datetime.datetime` object.
 
     """
     fieldtype = get_field_type(model, fieldname)
-    return isinstance(fieldtype, Date) or isinstance(fieldtype, DateTime)
+    return (isinstance(fieldtype, Date) or isinstance(fieldtype, DateTime)
+            or isinstance(fieldtype, Time))
 
 
 def is_interval_field(model, fieldname):
@@ -560,7 +562,7 @@ def strings_to_dates(model, dictionary):
     """
     result = {}
     for fieldname, value in dictionary.items():
-        if is_date_field(model, fieldname) and value is not None:
+        if is_date_or_time_field(model, fieldname) and value is not None:
             if value.strip() == '':
                 result[fieldname] = None
             elif value in CURRENT_TIME_MARKERS:
@@ -574,6 +576,8 @@ def strings_to_dates(model, dictionary):
                 fieldtype = get_field_type(model, fieldname)
                 if isinstance(fieldtype, Date):
                     result[fieldname] = value_as_datetime.date()
+                elif isinstance(fieldtype, Time):
+                    result[fieldname] = value_as_datetime.timetz()
         elif (is_interval_field(model, fieldname) and value is not None
               and isinstance(value, int)):
             result[fieldname] = datetime.timedelta(seconds=value)
