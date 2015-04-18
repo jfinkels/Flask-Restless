@@ -13,6 +13,7 @@
 """
 from datetime import date
 from datetime import datetime
+from datetime import time
 from datetime import timedelta
 import math
 # In Python 2, the function is `urllib.quote()`, in Python 3 it is
@@ -473,6 +474,20 @@ class TestAPI(TestSupport):
         assert response.status_code == 200
         data = loads(response.data)
         assert data['wakeup'] == now.isoformat()
+
+    def test_post_time_functions(self):
+        self.manager.create_api(
+            self.User, primary_key='id', methods=['GET', 'POST'])
+        orig_wakeup = time(8, 45, 0, 0)
+        data = dict(id=1, email='foo', wakeup=orig_wakeup.isoformat())
+        response = self.app.post('/api/user', data=dumps(data))
+        assert response.status_code == 201
+        response = self.app.get('/api/user/1')
+        assert response.status_code == 200
+        wakeup = loads(response.data)['wakeup']
+        assert wakeup is not None
+        wakeup = dateutil.parser.parse(wakeup).timetz()
+        assert wakeup == orig_wakeup
 
     def test_post_interval_functions(self):
         oldJSONEncoder = self.flaskapp.json_encoder

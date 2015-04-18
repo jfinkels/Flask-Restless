@@ -352,6 +352,8 @@ class TestSupport(ManagerTestBase):
             __tablename__ = 'satellite'
             name = Column(Unicode, primary_key=True)
             period = Column(Interval, nullable=True)
+            launch_date = Column(Date, nullable=True)
+            launch_time = Column(Time(timezone=True), nullable=True)
 
         class Star(self.Base):
             __tablename__ = 'star'
