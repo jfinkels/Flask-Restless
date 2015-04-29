@@ -24,6 +24,9 @@ from .helpers import url_for
 from .views import API
 from .views import FunctionAPI
 
+#: The Default url_prefix for the restless app
+DEFAULT_URL_PREFIX = '/api'
+
 #: The set of methods which are allowed by default when creating an API
 READONLY_METHODS = frozenset(('GET', ))
 
@@ -140,7 +143,7 @@ class APIManager(object):
 
         self.flask_sqlalchemy_db = kw.pop('flask_sqlalchemy_db', None)
         self.session = kw.pop('session', None)
-        self.universal_url_prefix = kw.pop('universal_url_prefix', '/api')
+        self.universal_url_prefix = kw.pop('universal_url_prefix', DEFAULT_URL_PREFIX)
         if self.app is not None:
             self.init_app(self.app, **kw)
 
@@ -227,7 +230,7 @@ class APIManager(object):
         return flask.url_for(joined, **kw)
 
     def init_app(self, app, session=None, flask_sqlalchemy_db=None,
-                 preprocessors=None, postprocessors=None):
+                 preprocessors=None, postprocessors=None, url_prefix=''):
         """Stores the specified :class:`flask.Flask` application object on
         which API endpoints will be registered and the
         :class:`sqlalchemy.orm.session.Session` object in which all database
@@ -308,7 +311,9 @@ class APIManager(object):
                              ' this application: {0}'.format(app))
         app.extensions['restless'] = RestlessInfo(session,
                                                   preprocessors or {},
-                                                  postprocessors or {})
+                                                  postprocessors or {},
+                                                  url_prefix or DEFAULT_URL_PREFIX,
+                                                  )
         # Now that this application has been initialized, create blueprints for
         # which API creation was deferred in :meth:`create_api`. This includes
         # all (args, kw) pairs for the key in :attr:`apis_to_create`
