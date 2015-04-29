@@ -14,6 +14,7 @@
 """
 from collections import defaultdict
 from collections import namedtuple
+import os
 
 import flask
 from flask import Blueprint
@@ -22,6 +23,9 @@ from .helpers import primary_key_name
 from .helpers import url_for
 from .views import API
 from .views import FunctionAPI
+
+#: The Default url_prefix for the restless app
+DEFAULT_URL_PREFIX = '/api'
 
 #: The set of methods which are allowed by default when creating an API
 READONLY_METHODS = frozenset(('GET', ))
@@ -35,7 +39,9 @@ READONLY_METHODS = frozenset(('GET', ))
 #: Flask applications registered using :meth:`APIManager.init_app`.
 RestlessInfo = namedtuple('RestlessInfo', ['session',
                                            'universal_preprocessors',
-                                           'universal_postprocessors'])
+                                           'universal_postprocessors',
+                                           'universal_url_prefix',
+                                           ])
 
 #: A global list of created :class:`APIManager` objects.
 created_managers = []
@@ -137,6 +143,7 @@ class APIManager(object):
 
         self.flask_sqlalchemy_db = kw.pop('flask_sqlalchemy_db', None)
         self.session = kw.pop('session', None)
+        self.universal_url_prefix = kw.pop('universal_url_prefix', DEFAULT_URL_PREFIX)
         if self.app is not None:
             self.init_app(self.app, **kw)
 
@@ -223,7 +230,7 @@ class APIManager(object):
         return flask.url_for(joined, **kw)
 
     def init_app(self, app, session=None, flask_sqlalchemy_db=None,
-                 preprocessors=None, postprocessors=None):
+                 preprocessors=None, postprocessors=None, url_prefix=''):
         """Stores the specified :class:`flask.Flask` application object on
         which API endpoints will be registered and the
         :class:`sqlalchemy.orm.session.Session` object in which all database
@@ -304,7 +311,9 @@ class APIManager(object):
                              ' this application: {0}'.format(app))
         app.extensions['restless'] = RestlessInfo(session,
                                                   preprocessors or {},
-                                                  postprocessors or {})
+                                                  postprocessors or {},
+                                                  url_prefix or DEFAULT_URL_PREFIX,
+                                                  )
         # Now that this application has been initialized, create blueprints for
         # which API creation was deferred in :meth:`create_api`. This includes
         # all (args, kw) pairs for the key in :attr:`apis_to_create`
@@ -321,7 +330,7 @@ class APIManager(object):
             app.register_blueprint(blueprint)
 
     def create_api_blueprint(self, model, app=None, methods=READONLY_METHODS,
-                             url_prefix='/api', collection_name=None,
+                             url_prefix='', collection_name=None,
                              allow_patch_many=False, allow_delete_many=False,
                              allow_functions=False, exclude_columns=None,
                              include_columns=None, include_methods=None,
@@ -381,6 +390,10 @@ class APIManager(object):
         is not specified, the lowercase name of the model will be used.
 
         `url_prefix` the URL prefix at which this API will be accessible.
+
+        * If `url_prefix` starts with '/', it'll overwrite the global prefix
+          `universal_url_prefix`. eg: `/api` + `/user` ==> `/user`
+        * else, it'll join behind. eg: `/api` + `user` ==> `/api/user`
 
         If `allow_patch_many` is ``True``, then requests to
         :http:patch:`/api/<collection_name>?q=<searchjson>` will attempt to
@@ -594,6 +607,11 @@ class APIManager(object):
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = APIManager._next_blueprint_name(app.blueprints,
                                                         apiname)
+
+        if url_prefix:
+            url_prefix = os.path.join(restlessinfo.universal_url_prefix, url_prefix)
+        else:
+            url_prefix = restlessinfo.universal_url_prefix
         # add the URL rules to the blueprint: the first is for methods on the
         # collection only, the second is for methods which may or may not
         # specify an instance, the third is for methods which must specify an
