@@ -495,7 +495,8 @@ class QueryBuilder(object):
                         relation_model = relation.mapper.class_
                         field = getattr(relation_model, field_name_in_relation)
                         direction = getattr(field, val.direction)
-                        query = query.join(relation_model)
+                        if relation_model not in [j.mapper.class_ for j in query._join_entities]:
+                            query = query.join(relation_model)
                         query = query.order_by(direction())
                     else:
                         field = getattr(model, val.field)
