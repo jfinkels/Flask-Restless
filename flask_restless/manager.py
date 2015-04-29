@@ -14,6 +14,7 @@
 """
 from collections import defaultdict
 from collections import namedtuple
+import os
 
 import flask
 from flask import Blueprint
@@ -35,7 +36,9 @@ READONLY_METHODS = frozenset(('GET', ))
 #: Flask applications registered using :meth:`APIManager.init_app`.
 RestlessInfo = namedtuple('RestlessInfo', ['session',
                                            'universal_preprocessors',
-                                           'universal_postprocessors'])
+                                           'universal_postprocessors',
+                                           'universal_url_prefix',
+                                           ])
 
 #: A global list of created :class:`APIManager` objects.
 created_managers = []
@@ -137,6 +140,7 @@ class APIManager(object):
 
         self.flask_sqlalchemy_db = kw.pop('flask_sqlalchemy_db', None)
         self.session = kw.pop('session', None)
+        self.universal_url_prefix = kw.pop('universal_url_prefix', '/api')
         if self.app is not None:
             self.init_app(self.app, **kw)
 
@@ -321,7 +325,7 @@ class APIManager(object):
             app.register_blueprint(blueprint)
 
     def create_api_blueprint(self, model, app=None, methods=READONLY_METHODS,
-                             url_prefix='/api', collection_name=None,
+                             url_prefix='', collection_name=None,
                              allow_patch_many=False, allow_delete_many=False,
                              allow_functions=False, exclude_columns=None,
                              include_columns=None, include_methods=None,
@@ -381,6 +385,10 @@ class APIManager(object):
         is not specified, the lowercase name of the model will be used.
 
         `url_prefix` the URL prefix at which this API will be accessible.
+
+        * If `url_prefix` starts with '/', it'll overwrite the global prefix
+          `universal_url_prefix`. eg: `/api` + `/user` ==> `/user`
+        * else, it'll join behind. eg: `/api` + `user` ==> `/api/user`
 
         If `allow_patch_many` is ``True``, then requests to
         :http:patch:`/api/<collection_name>?q=<searchjson>` will attempt to
@@ -594,6 +602,11 @@ class APIManager(object):
         # suffix an integer to apiname according to already existing blueprints
         blueprintname = APIManager._next_blueprint_name(app.blueprints,
                                                         apiname)
+
+        if url_prefix:
+            url_prefix = os.path.join(restlessinfo.universal_url_prefix, url_prefix)
+        else:
+            url_prefix = restlessinfo.universal_url_prefix
         # add the URL rules to the blueprint: the first is for methods on the
         # collection only, the second is for methods which may or may not
         # specify an instance, the third is for methods which must specify an
