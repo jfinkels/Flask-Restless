@@ -24,7 +24,7 @@
 """
 from __future__ import division
 
-from collections import defaultdict
+from collections import defaultdict, Iterable
 from functools import wraps
 import math
 import warnings
@@ -1183,7 +1183,7 @@ class API(ModelView):
 
         # perform a filtered search
         try:
-            result = search(self.session, self.model, search_params)
+            result = self._seek_results(search_params)
         except NoResultFound:
             return dict(message='No result found'), 404
         except MultipleResultsFound:
@@ -1204,7 +1204,7 @@ class API(ModelView):
         deep = dict((r, {}) for r in relations)
 
         # for security purposes, don't transmit list as top-level JSON
-        if isinstance(result, Query):
+        if isinstance(result, Query) or isinstance(result, Iterable):
             result = self._paginated(result, deep)
             # Create the Link header.
             #
@@ -1234,6 +1234,9 @@ class API(ModelView):
         # for more information.
         result[_HEADERS] = headers
         return result, 200, headers
+
+    def _seek_results(self, params):
+        return search(self.session, self.model, params)
 
     def get(self, instid, relationname, relationinstid):
         """Returns a JSON representation of an instance of model with the
