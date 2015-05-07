@@ -11,6 +11,7 @@
 """
 import datetime
 import inspect
+import operator
 import uuid
 
 from dateutil.parser import parse as parse_datetime
@@ -605,7 +606,14 @@ def count(session, query):
 
     """
     counts = query.selectable.with_only_columns([func.count()])
-    num_results = session.execute(counts.order_by(None)).scalar()
+    num_results = session.execute(counts.order_by(None))
+
+    if num_results.rowcount > 1:
+        # Workaround for LEFT OUTER JOIN combined with GROUP BY and ORDER BY
+        num_results = sum(map(operator.itemgetter(0), num_results))
+    else:
+        num_results = num_results.scalar()
+
     if num_results is None or query._limit:
         return query.count()
     return num_results
