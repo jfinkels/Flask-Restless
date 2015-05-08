@@ -1235,8 +1235,8 @@ class API(ModelView):
         result[_HEADERS] = headers
         return result, 200, headers
 
-    def _seek_results(self, params):
-        return search(self.session, self.model, params)
+    def _seek_results(self, params, *args, **kwargs):
+        return search(self.session, self.model, params, *args, **kwargs)
 
     def get(self, instid, relationname, relationinstid):
         """Returns a JSON representation of an instance of model with the
