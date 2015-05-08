@@ -11,6 +11,7 @@
 """
 import datetime
 import inspect
+import operator
 import uuid
 
 from dateutil.parser import parse as parse_datetime
@@ -356,7 +357,21 @@ def to_dict(instance, deep=None, exclude=None, include=None,
             result[key] = to_dict(value)
     # recursively call _to_dict on each of the `deep` relations
     deep = deep or {}
+
+    all_excludes = exclude or []
+    all_excludes.extend(list(exclude_relations) if exclude_relations else [])
+
+    all_includes = include or []
+    all_includes.extend(list(include_methods) if include_methods else [])
+    all_includes.extend(list(include_relations) if include_relations else [])
+
     for relation, rdeep in deep.items():
+        if (
+            (all_excludes and relation in all_excludes)
+            or (all_includes and relation not in all_includes)
+        ):
+            continue
+
         # Get the related value so we can see if it is None, a list, a query
         # (as specified by a dynamic relationship loader), or an actual
         # instance of a model.
@@ -590,11 +605,13 @@ def count(session, query):
     queries.
 
     """
-    counts = query.selectable.with_only_columns([func.count()])
-    num_results = session.execute(counts.order_by(None)).scalar()
-    if num_results is None or query._limit:
-        return query.count()
-    return num_results
+    # counts = query.selectable.with_only_columns([func.count()])
+    # num_results = session.execute(counts.order_by(None)).scalar()
+
+    # if num_results is None or query._limit:
+    #     return query.count()
+    # return num_results
+    return query.count()
 
 
 # This code comes from <http://stackoverflow.com/a/6798042/108197>, which is
