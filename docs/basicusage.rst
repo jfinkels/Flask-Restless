@@ -48,10 +48,12 @@ on models:
 
    db.create_all()
 
-If you are using pure SQLAlchemy::
+If you are using pure SQLAlchemy:
+
+.. sourcecode:: python
 
    from flask import Flask
-   from sqlalchemy import Column, Date, DateTime, Float, Integer, Unicode
+   from sqlalchemy import Column, Date, DateTime, Integer, Unicode
    from sqlalchemy import ForeignKey
    from sqlalchemy import create_engine
    from sqlalchemy.ext.declarative import declarative_base
@@ -66,23 +68,21 @@ If you are using pure SQLAlchemy::
    Base = declarative_base()
    Base.metadata.bind = engine
 
+   class Person(Base):
+       __tablename__ = 'person'
+       id = Column(Integer, primary_key=True)
+       name = Column(Unicode, unique=True)
+       birth_date = Column(Date)
+       computers = relationship('Computer',
+                                backref=backref('owner', lazy='dynamic'))
+
    class Computer(Base):
        __tablename__ = 'computer'
        id = Column(Integer, primary_key=True)
        name = Column(Unicode, unique=True)
        vendor = Column(Unicode)
-       buy_date = Column(DateTime)
        owner_id = Column(Integer, ForeignKey('person.id'))
-
-   class Person(Base):
-       __tablename__ = 'person'
-       id = Column(Integer, primary_key=True)
-       name = Column(Unicode, unique=True)
-       age = Column(Float)
-       other = Column(Float)
-       birth_date = Column(Date)
-       computers = relationship('Computer',
-                                backref=backref('owner', lazy='dynamic'))
+       purchase_time = Column(DateTime)
 
    Base.metadata.create_all()
 
