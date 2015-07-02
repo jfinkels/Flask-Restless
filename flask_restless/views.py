@@ -36,6 +36,7 @@ from flask import request
 from flask.views import MethodView
 from mimerender import FlaskMimeRender
 from sqlalchemy import Column
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.exc import DataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import OperationalError
@@ -187,8 +188,8 @@ def catch_integrity_errors(session):
         def wrapped(*args, **kw):
             try:
                 return func(*args, **kw)
-            # TODO should `sqlalchemy.exc.InvalidRequestError`s also be caught?
-            except (DataError, IntegrityError, ProgrammingError) as exception:
+            # Fix:#449 -- rollback has to be issued upon SQLAlchemyError
+            except SQLAlchemyError as exception:
                 session.rollback()
                 current_app.logger.exception(str(exception))
                 return dict(message=type(exception).__name__), 400
