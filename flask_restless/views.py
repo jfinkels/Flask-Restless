@@ -973,11 +973,7 @@ class API(ModelView):
             start = 0
             end = num_results
             total_pages = 1
-        objects = [to_dict(x, deep, exclude=self.exclude_columns,
-                           exclude_relations=self.exclude_relations,
-                           include=self.include_columns,
-                           include_relations=self.include_relations,
-                           include_methods=self.include_methods)
+        objects = [self.serialize(x)
                    for x in instances[start:end]]
         return dict(page=page_num, objects=objects, total_pages=total_pages,
                     num_results=num_results)
