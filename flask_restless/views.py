@@ -807,6 +807,8 @@ class API(ModelView):
 
         """
         submodel = get_related_model(self.model, relationname)
+        if isinstance(toremove, dict):
+            toremove = [toremove]
         for dictionary in toremove or []:
             remove = dictionary.pop('__delete__', False)
             if 'id' in dictionary:
