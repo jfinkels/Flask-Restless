@@ -1456,7 +1456,7 @@ class API(ModelView):
         # Determine the value of the primary key for this instance and
         # encode URL-encode it (in case it is a Unicode string).
         pk_name = self.primary_key or primary_key_name(instance)
-        primary_key = result[pk_name]
+        primary_key = getattr(instance, pk_name)
         try:
             primary_key = str(primary_key)
         except UnicodeEncodeError:
