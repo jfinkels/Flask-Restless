@@ -747,6 +747,25 @@ class API(ModelView):
 
         return column
 
+    def _get_allowed_relations(self, model=None):
+        """Returns a frozenset of elements that are relations we should
+        return for a given model, taking into account include/exclude_columns.
+        Defaults to the model for the given API instance, but can also take in
+        another model to get allowed relations.
+        """
+        if model is None:
+            model = self.model
+        # create a placeholder for the relations of the returned models
+        relations = frozenset(get_relations(model))
+        # do not follow relations that will not be included in the response
+        if self.include_columns is not None:
+            cols = frozenset(self.include_columns)
+            rels = frozenset(self.include_relations)
+            relations &= (cols | rels)
+        elif self.exclude_columns is not None:
+            relations -= frozenset(self.exclude_columns)
+        return relations
+
     def _add_to_relation(self, query, relationname, toadd=None):
         """Adds a new or existing related model to each model specified by
         `query`.
@@ -989,16 +1008,7 @@ class API(ModelView):
         constructor of this class.
 
         """
-        # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
-        # do not follow relations that will not be included in the response
-        if self.include_columns is not None:
-            cols = frozenset(self.include_columns)
-            rels = frozenset(self.include_relations)
-            relations &= (cols | rels)
-        elif self.exclude_columns is not None:
-            relations -= frozenset(self.exclude_columns)
-        deep = dict((r, {}) for r in relations)
+        deep = dict((r, {}) for r in self._get_allowed_relations())
         return to_dict(inst, deep, exclude=self.exclude_columns,
                        exclude_relations=self.exclude_relations,
                        include=self.include_columns,
@@ -1178,16 +1188,7 @@ class API(ModelView):
             current_app.logger.exception(str(exception))
             return dict(message='Unable to construct query'), 400
 
-        # create a placeholder for the relations of the returned models
-        relations = frozenset(get_relations(self.model))
-        # do not follow relations that will not be included in the response
-        if self.include_columns is not None:
-            cols = frozenset(self.include_columns)
-            rels = frozenset(self.include_relations)
-            relations &= (cols | rels)
-        elif self.exclude_columns is not None:
-            relations -= frozenset(self.exclude_columns)
-        deep = dict((r, {}) for r in relations)
+        deep = dict((r, {}) for r in self._get_allowed_relations())
 
         # for security purposes, don't transmit list as top-level JSON
         if isinstance(result, Query):
@@ -1258,10 +1259,8 @@ class API(ModelView):
             result = self.serialize(instance)
         else:
             related_value = getattr(instance, relationname)
-            # create a placeholder for the relations of the returned models
             related_model = get_related_model(self.model, relationname)
-            relations = frozenset(get_relations(related_model))
-            deep = dict((r, {}) for r in relations)
+            deep = dict((r, {}) for r in self._get_allowed_relations(related_model))
             if relationinstid is not None:
                 related_value_instance = get_by(self.session, related_model,
                                                 relationinstid)
