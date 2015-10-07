@@ -1589,6 +1589,10 @@ class API(ModelView):
                 postprocessor(query=query, result=result,
                               search_params=search_params)
         else:
+            instance = self.deserialize(data)
+            pk_name = self.primary_key or primary_key_name(instance)
+            if pk_name in data:
+                instid = data[pk_name]
             result = self._instid_to_dict(instid)
             for postprocessor in self.postprocessors['PATCH_SINGLE']:
                 postprocessor(result=result)
