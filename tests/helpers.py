@@ -104,12 +104,18 @@ def unregister_fsa_session_signals():
     if not flask_sa:
         return
 
-    event.remove(SessionBase, 'before_commit',
-                 flask_sa._SessionSignalEvents.session_signal_before_commit)
-    event.remove(SessionBase, 'after_commit',
-                 flask_sa._SessionSignalEvents.session_signal_after_commit)
-    event.remove(SessionBase, 'after_rollback',
-                 flask_sa._SessionSignalEvents.session_signal_after_rollback)
+    if event.contains(SessionBase, 'before_commit',
+                      flask_sa._SessionSignalEvents.session_signal_before_commit):
+        event.remove(SessionBase, 'before_commit',
+                     flask_sa._SessionSignalEvents.session_signal_before_commit)
+    if event.contains(SessionBase, 'after_commit',
+                      flask_sa._SessionSignalEvents.session_signal_after_commit):
+        event.remove(SessionBase, 'after_commit',
+                     flask_sa._SessionSignalEvents.session_signal_after_commit)
+    if event.contains(SessionBase, 'after_rollback',
+                      flask_sa._SessionSignalEvents.session_signal_after_rollback):
+        event.remove(SessionBase, 'after_rollback',
+                     flask_sa._SessionSignalEvents.session_signal_after_rollback)
 
 
 def force_json_contenttype(test_client):
