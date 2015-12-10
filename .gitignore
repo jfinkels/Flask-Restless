@@ -22,3 +22,5 @@ build/
 dist/
 *egg*/
 docs/_build
+venv/
+/*.egg

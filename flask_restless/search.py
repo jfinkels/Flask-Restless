@@ -19,6 +19,7 @@ import inspect
 from sqlalchemy import and_
 from sqlalchemy import or_
 from sqlalchemy.ext.associationproxy import AssociationProxy
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 from .helpers import session_query
@@ -492,7 +493,7 @@ class QueryBuilder(object):
                         field_name, field_name_in_relation = \
                             field_name.split('__')
                         relation = getattr(model, field_name)
-                        relation_model = relation.mapper.class_
+                        relation_model = aliased(relation.mapper.class_)
                         field = getattr(relation_model, field_name_in_relation)
                         direction = getattr(field, val.direction)
                         query = query.join(relation_model)
