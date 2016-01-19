@@ -12,7 +12,7 @@ extension, and building of documentation.
 
 For more information, check the World Wide Web!
 
-  * [Documentation](http://readthedocs.org/docs/flask-restless)
+  * [Documentation](http://flask-restless.readthedocs.org/en/latest/)
   * [Python Package Index listing](http://pypi.python.org/pypi/Flask-Restless)
   * [Source code repository](http://github.com/jfinkels/flask-restless)
 
