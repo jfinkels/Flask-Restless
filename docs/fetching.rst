@@ -947,7 +947,7 @@ The operators recognized by the API incude:
 * ``is_null``, ``is_not_null``
 * ``like``, ``ilike``
 * ``has``
-* ``any``
+* ``any``, ``not_any``
 
 These correspond to the appropriate `SQLAlchemy column operators`_.
 
