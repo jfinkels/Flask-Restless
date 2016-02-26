@@ -99,6 +99,7 @@ LINK_NAMES = ('first', 'last', 'prev', 'next')
 #: The query parameter key that identifies filter objects in a
 #: :http:method:`get` request.
 FILTER_PARAM = 'filter[objects]'
+FILTER_REGEX = '''filter\[(.+?)\]'''
 
 #: The query parameter key that identifies sort fields in a :http:method:`get`
 #: request.
@@ -1269,6 +1270,21 @@ class APIBase(ModelView):
         """
         # Determine filtering options.
         filters = json.loads(request.args.get(FILTER_PARAM, '[]'))
+
+        #only work if the query params doesn't contain filter[objects]
+        if (len(filters) == 0):
+            for key, value in request.args.iterlists():
+                #search for filter params
+                param = re.search(FILTER_REGEX, key, re.I)
+                if param and param.group(1) != "objects" and param.group(1) != "single":
+                    #add to filtering options
+                    if (len(filters) < 1):
+                        filters.append({'name': param.group(1), 'op': 'like', 'val': value[0]})
+                    elif (len(filters) == 1):
+                        tmp = filters[0]
+                        filters[0] = {'and':[tmp, {'name': param.group(1), 'op': 'like', 'val': value[0]}]}
+                    else:
+                        filters[0]['and'].append({'name': param.group(1), 'op': 'like', 'val': value[0]})
         # # TODO fix this using the below
         # filters = [strings_to_dates(self.model, f) for f in filters]
 
