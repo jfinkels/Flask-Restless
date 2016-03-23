@@ -948,7 +948,7 @@ appropriate `SQLAlchemy column operators`_.
 * ``is_null``, ``is_not_null``
 * ``like``, ``ilike``, ``not_like``
 * ``has``
-* ``any``
+* ``any``, ``not_any``
 
 Flask-Restless also understands the `PostgreSQL network address operators`_
 ``<<``, ``<<=``, ``>>``, ``>>=``, ``<>``, and ``&&``.
