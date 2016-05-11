@@ -299,7 +299,7 @@ class DefaultSerializer(Serializer):
                    if not c.startswith('__') and c not in COLUMN_BLACKLIST)
         # Exclude column names that are foreign keys.
         foreign_key_columns = foreign_keys(model)
-        columns = (c for c in columns if c not in foreign_key_columns)
+        columns = (c for c in columns if c not in foreign_key_columns or c == primary_key_for(model))
 
         # Create a dictionary mapping attribute name to attribute value for
         # this particular instance.
@@ -315,7 +315,7 @@ class DefaultSerializer(Serializer):
         # Serialize any date- or time-like objects that appear in the
         # attributes.
         #
-        # TODO In Flask 1.0, the default JSON encoder for the Flask
+        # TODO In Flask 0.11, the default JSON encoder for the Flask
         # application object does this automatically. Alternately, the
         # user could have set a smart JSON encoder on the Flask
         # application, which would cause these attributes to be
@@ -458,41 +458,11 @@ class DefaultSerializer(Serializer):
         return result
 
     def serialize_many(self, instances, only=None):
-        # Here we are assuming the iterable of instances is homogeneous
-        # (i.e. each instance is of the same type).
-        #
-        # Since loading each instance from a given resource object
-        # representation could theoretically raise a
-        # DeserializationException, we collect all the errors and wrap
-        # them in a MultipleExceptions exception object.
-        resources = []
-        failed = []
-        for instance in instances:
-            try:
-                resource = self._dump(instance, only=only)
-                resources.append(resource)
-            except SerializationException as exception:
-                failed.append(exception)
-        if failed:
-            raise MultipleExceptions(failed)
-        result = JsonApiDocument()
-        result['data'] = resources
-        return result
-
-
-class HeterogeneousSerializer(DefaultSerializer):
-    """A serializer for heterogeneous collections of instances (that is,
-    collections in which each instance is of a different type).
-
-    This class overrides the :meth:`DefaultSerializer.serialize_many`
-    method, which currently works only for homogeneous collections, to
-    apply the correct model-specific serializer for each instance (as
-    registered at the time of invoking :meth:`APIManager.create_api`).
-
-    """
-
-    def serialize_many(self, instances, only=None):
         """Serializes each instance using its model-specific serializer.
+
+        This method works for heterogeneous collections of instances
+        (that is, collections in which each instance is of a different
+        type).
 
         The `only` keyword argument must be a dictionary mapping
         resource type name to list of fields representing a sparse
@@ -501,7 +471,7 @@ class HeterogeneousSerializer(DefaultSerializer):
         :meth:`DefaultSerializer.serialize` method.
 
         """
-        result = []
+        resources = []
         failed = []
         for instance in instances:
             # Determine the serializer for this instance.
@@ -530,11 +500,13 @@ class HeterogeneousSerializer(DefaultSerializer):
                 #
                 # TODO We could use `serializer._dump` instead.
                 serialized = serialized['data']
-                result.append(serialized)
+                resources.append(serialized)
             except SerializationException as exception:
                 failed.append(exception)
         if failed:
             raise MultipleExceptions(failed)
+        result = JsonApiDocument()
+        result['data'] = resources
         return result
 
 
@@ -588,8 +560,6 @@ class DefaultRelationshipSerializer(Serializer):
 #: serialization methods.
 singleton_serializer = DefaultSerializer()
 
-singleton_heterogeneous_serializer = HeterogeneousSerializer()
-
 #: This is an instance of the default relationship serializer class,
 #: :class:`DefaultRelationshipSerializer`.
 #:
@@ -612,8 +582,6 @@ simple_serialize = singleton_serializer.serialize
 #: This function is suitable for calling on its own, no other
 #: instantiation or customization necessary.
 simple_serialize_many = singleton_serializer.serialize_many
-
-simple_heterogeneous_serialize_many = singleton_heterogeneous_serializer.serialize_many
 
 simple_relationship_dump = singleton_relationship_serializer._dump
 
