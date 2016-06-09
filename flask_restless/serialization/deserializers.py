@@ -106,33 +106,39 @@ class DefaultDeserializer(Deserializer):
 
     """
 
-    def __init__(self, session, model, allow_client_generated_ids=False, **kw):
+    def __init__(self, session, model,
+                 allow_client_generated_ids=False, relationship_deserializer=DefaultRelationshipDeserializer,
+                 **kw):
         super(DefaultDeserializer, self).__init__(session, model, **kw)
 
         #: Whether to allow client generated IDs.
         self.allow_client_generated_ids = allow_client_generated_ids
+        #: The default deserializer for relationships
+        self.relationship_deserializer = relationship_deserializer or DefaultRelationshipDeserializer
 
-    def _load(self, data):
-        """Returns a new instance of a SQLAlchemy model represented by
-        the given resource object.
-
-        `data` is a dictionary representation of a JSON API resource
-        object.
-
-        This method may raise one of various
-        :exc:`DeserializationException` subclasses. If the instance has
-        a to-many relationship, this method may raise
-        :exc:`MultipleExceptions` as well, if there are multiple
-        exceptions when deserializing the related instances.
-
+    def cleanup_input_data(self, document):
         """
+        Checks the input document and returns the data associated to it if any
+        :param document: The raw document for deserialization
+        :return: The model data associated in the document
+        """
+        if 'data' not in document:
+            raise MissingData
+        data = document['data']
         if 'type' not in data:
             raise MissingType
         if 'id' in data and not self.allow_client_generated_ids:
             raise ClientGeneratedIDNotAllowed
-        # Determine the model from the type name that the the user is
-        # requesting. If no model is known with the given type, raise an
-        # exception.
+        return data
+
+    def get_model_from_data(self, data):
+        """
+        Determines the model from the type name that the the user is
+        requesting. If no model is known with the given type, raises an
+        exception.
+        :param data: The data from which to extract the information
+        :return: The associated model
+        """
         type_ = data.pop('type')
         expected_type = collection_name(self.model)
         try:
@@ -146,8 +152,15 @@ class DefaultDeserializer(Deserializer):
         #
         if type_ != expected_type:
             raise ConflictingType(expected_type, type_)
-        # Check for any request parameter naming a column which does not exist
-        # on the current model.
+        return model
+
+    def check_relationships(self, data, model):
+        """
+        Checks for any request parameter naming a column which does not exist
+        on the current model.
+        :param data: The data from which to extract the information
+        :param model: The model to check against
+        """
         for field in data:
             if field == 'relationships':
                 for relation in data['relationships']:
@@ -157,14 +170,24 @@ class DefaultDeserializer(Deserializer):
                 for attribute in data['attributes']:
                     if not has_field(model, attribute):
                         raise UnknownAttribute(attribute)
-        # Determine which related instances need to be added.
+
+    def generate_relationship_links(self, data, model):
+        """
+        Determines which related instances need to be added and returns a dictionary
+        of links in the following form:
+
+        links = {relationship_name: deserialized_object, ...}
+
+        :param data: The data from which to extract the information
+        :param model: The model to check against
+        :return: A dictionary of the links to the related models
+        """
         links = {}
         if 'relationships' in data:
             links = data.pop('relationships', {})
             for link_name, link_object in links.items():
                 related_model = get_related_model(model, link_name)
-                DRD = DefaultRelationshipDeserializer
-                deserializer = DRD(self.session, related_model, link_name)
+                deserializer = self.relationship_deserializer(self.session, related_model, link_name)
                 # Create the deserializer for this relationship object.
                 if is_like_list(model, link_name):
                     deserialize = deserializer.deserialize_many
@@ -173,6 +196,15 @@ class DefaultDeserializer(Deserializer):
                 # This may raise a DeserializationException or
                 # MultipleExceptions.
                 links[link_name] = deserialize(link_object)
+        return links
+
+    def cleanup_data(self, data, model):
+        """
+        Cleans up the data and transforms the necessary attributes
+        :param data: The data from which to extract the information
+        :param model: The model to check against
+        :return: The updated data object
+        """
         # TODO Need to check here if any related instances are None,
         # like we do in the patch() method. We could possibly refactor
         # the code above and the code there into a helper function...
@@ -181,9 +213,25 @@ class DefaultDeserializer(Deserializer):
         data.update(data.pop('attributes', {}))
         # Special case: if there are any dates, convert the string form of the
         # date into an instance of the Python ``datetime`` object.
-        data = strings_to_datetimes(model, data)
+        return strings_to_datetimes(model, data)
+
+    def create_model_from_data(self, data, model):
+        """
+        Creates a new model object from the given data
+        :param data: The data from which to build the object
+        :param model: The model to build the object from
+        :return: An instance of the object built with data
+        """
         # Create the new instance by keyword attributes.
-        instance = model(**data)
+        return model(**data)
+
+    def setup_relationships_in_instance(self, instance, links):
+        """
+        Links the given relationships to the instance
+        :param instance: The instance to fill
+        :param links: The dictionary of links to set on the instance
+        :return: The updated instance
+        """
         # Set each relation specified in the links.
         for relation_name, related_value in links.items():
             setattr(instance, relation_name, related_value)
@@ -196,14 +244,26 @@ class DefaultDeserializer(Deserializer):
         Everything in the `document` other than the `data` element is
         ignored.
 
+        `data` is a dictionary representation of a JSON API resource
+        object.
+
+        This method may raise one of various
+        :exc:`DeserializationException` subclasses. If the instance has
+        a to-many relationship, this method may raise
+        :exc:`MultipleExceptions` as well, if there are multiple
+        exceptions when deserializing the related instances.
+
         For more information, see the documentation for the
         :meth:`Deserializer.deserialize` method.
 
         """
-        if 'data' not in document:
-            raise MissingData
-        data = document['data']
-        return self._load(data)
+        data = self.cleanup_input_data(document)
+        model = self.get_model_from_data(data)
+        self.check_relationships(data, model)
+        links = self.generate_relationship_links(data, model)
+        data = self.cleanup_data(data, model)
+        instance = self.create_model_from_data(data, model)
+        return self.setup_relationships_in_instance(instance, links)
 
     # # TODO JSON API currently doesn't support bulk creation of resources,
     # # so this code cannot be accurately used/tested.
