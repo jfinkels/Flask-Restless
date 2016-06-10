@@ -24,7 +24,7 @@ from datetime import datetime
 from unittest2 import skip
 
 try:
-    from flask.ext.sqlalchemy import SQLAlchemy
+    from flask_sqlalchemy import SQLAlchemy
 except ImportError:
     has_flask_sqlalchemy = False
 else:
@@ -42,9 +42,9 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 
-from flask.ext.restless import APIManager
-from flask.ext.restless import CONTENT_TYPE
-from flask.ext.restless import ProcessingException
+from flask_restless import APIManager
+from flask_restless import CONTENT_TYPE
+from flask_restless import ProcessingException
 
 from .helpers import BetterJSONEncoder as JSONEncoder
 from .helpers import check_sole_error
@@ -1060,6 +1060,39 @@ class TestProcessors(ManagerTestBase):
         assert person.name == 'bar'
         assert temp == ['baz']
 
+    def test_postprocessor_no_commit_on_error(self):
+        """Tests that a processing exception causes the session to be
+        flushed but not committed.
+
+        """
+
+        def raise_error(**kw):
+            raise ProcessingException(status=500)
+
+        person = self.Person(id=1, name=u'foo')
+        self.session.add(person)
+        self.session.commit()
+
+        postprocessors = dict(PATCH_RESOURCE=[raise_error])
+        self.manager.create_api(self.Person, methods=['PATCH'],
+                                postprocessors=postprocessors)
+
+        data = {
+            'data': {
+                'id': '1',
+                'type': 'person',
+                'attributes': {
+                    'name': u'bar'
+                }
+            }
+        }
+        response = self.app.patch('/api/person/1', data=dumps(data))
+
+        assert response.status_code == 500
+        assert person.name == u'bar'
+        self.session.rollback()
+        assert person.name == u'foo'
+
 
 class TestAssociationProxy(ManagerTestBase):
     """Tests for creating an object with a relationship using an association
@@ -1069,7 +1102,7 @@ class TestAssociationProxy(ManagerTestBase):
 
     def setUp(self):
         """Creates the database, the :class:`~flask.Flask` object, the
-        :class:`~flask.ext.restless.manager.APIManager` for that application,
+        :class:`~flask_restless.manager.APIManager` for that application,
         and creates the ReSTful API endpoints for the models used in the test
         methods.
 

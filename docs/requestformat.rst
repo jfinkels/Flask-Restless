@@ -143,9 +143,10 @@ Then in your Javascript client code, write the function ``foo`` like this:
 JSON API extensions
 -------------------
 
-Flask-Restless does not yet support the official JSON API extension. For
-progress on the implementation of the official extensions, see GitHub issues
-#478 and #477.
+Flask-Restless does not yet support the in-development `JSON API extension
+system`_.
+
+.. _JSON API extension system: http://jsonapi.org/extensions/
 
 
 Cross-Origin Resource Sharing (CORS)
@@ -163,7 +164,7 @@ sent from the server to the client) using the
 :meth:`flask.Blueprint.after_request` method::
 
     from flask import Flask
-    from flask.ext.restless import APIManager
+    from flask_restless import APIManager
 
     def add_cors_headers(response):
         response.headers['Access-Control-Allow-Origin'] = 'example.com'

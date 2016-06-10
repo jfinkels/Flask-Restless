@@ -37,10 +37,11 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 
-from flask.ext.restless import APIManager
-from flask.ext.restless import CONTENT_TYPE
-from flask.ext.restless import DefaultDeserializer
-from flask.ext.restless import DefaultSerializer
+from flask_restless import APIManager
+from flask_restless import CONTENT_TYPE
+from flask_restless import DefaultDeserializer
+from flask_restless import DefaultSerializer
+from flask_restless import ProcessingException
 
 from .helpers import BetterJSONEncoder as JSONEncoder
 from .helpers import check_sole_error
@@ -915,6 +916,27 @@ class TestProcessors(ManagerTestBase):
         document = loads(response.data)
         assert document['foo'] == 'bar'
 
+    def test_postprocessor_no_commit_on_error(self):
+        """Tests that a processing exception causes the session to be
+        flushed but not committed.
+
+        """
+
+        def raise_error(**kw):
+            raise ProcessingException(status=500)
+
+        postprocessors = dict(POST_RESOURCE=[raise_error])
+        self.manager.create_api(self.Person, methods=['POST'],
+                                postprocessors=postprocessors)
+        data = dict(data=dict(type='person'))
+        response = self.app.post('/api/person', data=dumps(data))
+        assert response.status_code == 500
+        person_count = self.session.query(self.Person).count()
+        assert person_count == 1
+        self.session.rollback()
+        person_count = self.session.query(self.Person).count()
+        assert person_count == 0
+
 
 class TestAssociationProxy(ManagerTestBase):
     """Tests for creating an object with a relationship using an association
@@ -924,7 +946,7 @@ class TestAssociationProxy(ManagerTestBase):
 
     def setUp(self):
         """Creates the database, the :class:`~flask.Flask` object, the
-        :class:`~flask.ext.restless.manager.APIManager` for that application,
+        :class:`~flask_restless.manager.APIManager` for that application,
         and creates the ReSTful API endpoints for the models used in the test
         methods.
 

@@ -26,8 +26,8 @@ from sqlalchemy import Integer
 from sqlalchemy import Unicode
 from sqlalchemy.orm import relationship
 
-from flask.ext.restless import APIManager
-from flask.ext.restless import ProcessingException
+from flask_restless import APIManager
+from flask_restless import ProcessingException
 
 from .helpers import dumps
 from .helpers import loads
@@ -265,6 +265,31 @@ class TestProcessors(ManagerTestBase):
                                 postprocessors=postprocessors)
         response = self.app.delete('/api/person/1')
         assert response.status_code == 204
+
+    def test_postprocessor_no_commit_on_error(self):
+        """Tests that a processing exception causes the session to be
+        flushed but not committed.
+
+        """
+
+        def raise_error(**kw):
+            raise ProcessingException(status=500)
+
+        person = self.Person(id=1)
+        self.session.add(person)
+        self.session.commit()
+
+        postprocessors = dict(DELETE_RESOURCE=[raise_error])
+        self.manager.create_api(self.Person, methods=['DELETE'],
+                                postprocessors=postprocessors)
+        response = self.app.delete('/api/person/1')
+
+        assert response.status_code == 500
+        people = self.session.query(self.Person).all()
+        assert people == []
+        self.session.rollback()
+        people = self.session.query(self.Person).all()
+        assert people == [person]
 
 
 class TestFlaskSQLAlchemy(FlaskSQLAlchemyTestBase):

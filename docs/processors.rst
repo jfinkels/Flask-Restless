@@ -201,9 +201,9 @@ This may be used, for example, if all :http:method:`post` requests require
 authentication::
 
     from flask import Flask
-    from flask.ext.restless import APIManager
-    from flask.ext.restless import ProcessingException
-    from flask.ext.login import current_user
+    from flask_restless import APIManager
+    from flask_restless import ProcessingException
+    from flask_login import current_user
     from mymodels import User
     from mymodels import session
 
@@ -243,6 +243,17 @@ keyword argument. For example::
     preprocessors = {'GET_COLLECTION': [preprocessor]}
     manager.create_api(Person, preprocessors=preprocessors)
 
+
+When does the session get committed?
+------------------------------------
+
+For requests to create a resource, update a resource, or delete a resource, the
+session is flushed *before* the postprocessor is executed and committed
+*after*. Therefore, if a postprocessor raises a :exc:`.ProcessingException`,
+then the session has *not* been committed, so your code can then decide to, for
+example, roll back the session or commit it.
+
+
 .. _authentication:
 
 Requiring authentication for some methods
@@ -251,9 +262,9 @@ Requiring authentication for some methods
 If you want certain HTTP methods to require authentication, use preprocessors::
 
     from flask import Flask
-    from flask.ext.restless import APIManager
-    from flask.ext.restless import ProcessingException
-    from flask.ext.login import current_user
+    from flask_restless import APIManager
+    from flask_restless import ProcessingException
+    from flask_login import current_user
     from mymodels import User
 
     def auth_func(*args, **kwargs):
