@@ -24,7 +24,6 @@ from sqlalchemy import Integer
 from sqlalchemy import Enum
 from sqlalchemy import Unicode
 
-
 from flask_restless import DefaultSerializer
 
 from .helpers import check_sole_error
