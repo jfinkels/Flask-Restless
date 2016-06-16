@@ -38,7 +38,6 @@ class PolymorphismTestBaseSingle(ManagerTestBase, ):
 
     """
 
-
     def setUp(self):
         """Creates polymorphic models using single table inheritance."""
 
