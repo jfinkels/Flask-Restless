@@ -19,7 +19,7 @@ inheritance`_.
 """
 from operator import itemgetter
 
-from sqlalchemy import Column
+from sqlalchemy import Column, ForeignKey
 from sqlalchemy import Integer
 from sqlalchemy import Enum
 from sqlalchemy import Unicode
@@ -33,16 +33,9 @@ from .helpers import loads
 from .helpers import ManagerTestBase
 
 
-class PolymorphismTestBase(ManagerTestBase):
-    """Base class for tests of APIs created for polymorphic models
-    defined using single table inheritance.
+class SingleTableBase():
 
-    """
-
-    def setUp(self):
-        """Creates polymorphic models using single table inheritance."""
-        super(PolymorphismTestBase, self).setUp()
-
+    def set_up_models(self):
         class Employee(self.Base):
             __tablename__ = 'employee'
             id = Column(Integer, primary_key=True)
@@ -53,8 +46,8 @@ class PolymorphismTestBase(ManagerTestBase):
                 'polymorphic_identity': 'employee'
             }
 
-        # This model inherits directly from the `Employee` class, so
-        # there is only one table being used.
+            # This model inherits directly from the `Employee` class, so
+            # there is only one table being used.
         class Manager(Employee):
             __mapper_args__ = {
                 'polymorphic_identity': 'manager'
@@ -62,15 +55,33 @@ class PolymorphismTestBase(ManagerTestBase):
 
         self.Employee = Employee
         self.Manager = Manager
-        self.Base.metadata.create_all()
 
 
-class FetchingTestBase(PolymorphismTestBase):
-    """Base class for test cases for fetching resources."""
+    def post_setup(self):
+        pass
+
+class PolymorphismTestBaseSingle(ManagerTestBase, SingleTableBase):
+    """Base class for tests of APIs created for polymorphic models
+    defined using single table inheritance.
+
+    """
+
 
     def setUp(self):
-        super(FetchingTestBase, self).setUp()
+        """Creates polymorphic models using single table inheritance."""
+        super(PolymorphismTestBaseSingle, self).setUp()
 
+        self.set_up_models()
+
+        self.Base.metadata.create_all()
+
+        self.post_setup()
+
+
+class FetchingTestBase():
+    """Base class for test cases for fetching resources."""
+
+    def post_setup(self):
         # Create the APIs for the Employee and Manager.
         self.apimanager = self.manager
         self.apimanager.create_api(self.Employee)
@@ -84,7 +95,7 @@ class FetchingTestBase(PolymorphismTestBase):
         self.session.commit()
 
 
-class TestFetchCollection(FetchingTestBase):
+class BaseFetchCollection():
     """Tests for fetching a collection of resources defined using single
     table inheritance.
 
@@ -156,7 +167,7 @@ class TestFetchCollection(FetchingTestBase):
         assert employees[1]['attributes']['baz'] == 'xyzzy'
 
 
-class TestFetchResource(FetchingTestBase):
+class BaseTestFetchResource():
     """Tests for fetching a single resource defined using single table
     inheritance.
 
@@ -203,14 +214,13 @@ class TestFetchResource(FetchingTestBase):
         assert response.status_code == 404
 
 
-class TestCreating(PolymorphismTestBase):
+class BaseTestCreating():
     """Tests for APIs created for polymorphic models defined using
     single table inheritance.
 
     """
 
-    def setUp(self):
-        super(TestCreating, self).setUp()
+    def post_setup(self):
         self.manager.create_api(self.Employee, methods=['POST'])
         self.manager.create_api(self.Manager, methods=['POST'])
 
@@ -279,11 +289,10 @@ class TestCreating(PolymorphismTestBase):
                                          'type', 'manager', 'employee'])
 
 
-class TestDeleting(PolymorphismTestBase):
+class BaseTestDeleting():
     """Tests for deleting resources."""
 
-    def setUp(self):
-        super(TestDeleting, self).setUp()
+    def post_setup(self):
 
         # Create the APIs for the Employee and Manager.
         self.manager.create_api(self.Employee, methods=['DELETE'])
@@ -340,11 +349,11 @@ class TestDeleting(PolymorphismTestBase):
         assert self.session.query(self.Employee).all() == self.all_employees
 
 
-class TestUpdating(PolymorphismTestBase):
+class BaseTestUpdating():
     """Tests for updating resources."""
 
-    def setUp(self):
-        super(TestUpdating, self).setUp()
+    def post_setup(self):
+
 
         # Create the APIs for the Employee and Manager.
         self.manager.create_api(self.Employee, methods=['PATCH'])
@@ -434,3 +443,91 @@ class TestUpdating(PolymorphismTestBase):
         response = self.app.patch('/api/manager/1', data=dumps(data))
         check_sole_error(response, 404, ['No resource found', 'type',
                                          'manager', 'ID', '1'])
+
+
+class TestCollectionSingle(BaseFetchCollection, FetchingTestBase,PolymorphismTestBaseSingle):
+    pass
+
+
+class TestFetchResourceSingle(BaseTestFetchResource, FetchingTestBase, PolymorphismTestBaseSingle):
+    pass
+
+
+class TestCreatingSingle(BaseTestCreating, PolymorphismTestBaseSingle):
+    pass
+
+
+class TestDeletingSingle(BaseTestDeleting, PolymorphismTestBaseSingle):
+    pass
+
+
+class TestUpdatingSingle(BaseTestUpdating, PolymorphismTestBaseSingle):
+    pass
+
+
+class JoinedTableBase():
+
+    def set_up_models(self):
+        print('Using joined')
+
+        class Employee(self.Base):
+            __tablename__ = 'employee'
+            id = Column(Integer, primary_key=True)
+            type = Column(Enum('employee', 'manager'), nullable=False)
+            name = Column(Unicode)
+            __mapper_args__ = {
+                'polymorphic_on': type,
+                'polymorphic_identity': 'employee'
+            }
+
+        # Joined Table Inheritance
+        class Manager(Employee):
+            __tablename__ = 'manager'
+            id = Column(Integer, ForeignKey('employee.id'), primary_key=True)
+            __mapper_args__ = {
+                'polymorphic_identity': 'manager'
+            }
+
+        self.Employee = Employee
+        self.Manager = Manager
+
+    def post_setup(self):
+        pass
+
+
+class PolymorphismTestBaseJoined(ManagerTestBase, JoinedTableBase):
+    """Base class for tests of APIs created for polymorphic models
+    defined using single table inheritance.
+
+    """
+
+
+    def setUp(self):
+        """Creates polymorphic models using single table inheritance."""
+        super(PolymorphismTestBaseJoined, self).setUp()
+
+        self.set_up_models()
+
+        self.Base.metadata.create_all()
+
+        self.post_setup()
+
+
+class TestCollectionJoined(BaseFetchCollection, FetchingTestBase,PolymorphismTestBaseJoined):
+    pass
+
+
+class TestFetchResourceJoined(BaseTestFetchResource, FetchingTestBase, PolymorphismTestBaseJoined):
+    pass
+
+
+class TestCreatingJoined(BaseTestCreating, PolymorphismTestBaseJoined):
+    pass
+
+
+class TestDeletingJoined(BaseTestDeleting, PolymorphismTestBaseJoined):
+    pass
+
+
+class TestUpdatingJoined(BaseTestUpdating, PolymorphismTestBaseJoined):
+    pass
