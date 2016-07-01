@@ -29,14 +29,14 @@ from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import validates
 
-# for SAValidation package on pypi.python.org
 try:
-    import savalidation as _sav
-    import savalidation.validators as sav
+    from savalidation import ValidationError
+    from savalidation import ValidationMixin
+    from savalidation.validators import validates_presence_of
+    from savalidation.validators import validates_email
 except:
     has_savalidation = False
 else:
-    sav_version = tuple(int(n) for n in _sav.VERSION.split('.'))
     has_savalidation = True
 
 from .helpers import check_sole_error
@@ -255,8 +255,7 @@ class TestSimpleValidation(ManagerTestBase):
         assert person.articles == []
 
 
-@skip_unless(has_savalidation and sav_version >= (0, 2) and
-             sys.version_info < (3, ), 'savalidation not found.')
+@skip_unless(has_savalidation, 'savalidation not found.')
 class TestSAValidation(ManagerTestBase):
     """Tests for validation errors raised by the ``savalidation`` package. For
     more information about this package, see `its PyPI page
@@ -268,17 +267,17 @@ class TestSAValidation(ManagerTestBase):
         """Create APIs for the validated models."""
         super(TestSAValidation, self).setUp()
 
-        class Person(self.Base, _sav.ValidationMixin):
+        class Person(self.Base, ValidationMixin):
             __tablename__ = 'person'
             id = Column(Integer, primary_key=True)
             email = Column(Unicode)
 
-            sav.validates_presence_of('email')
-            sav.validates_email('email')
+            validates_presence_of('email')
+            validates_email('email')
 
         self.Person = Person
         self.Base.metadata.create_all()
-        exceptions = [_sav.ValidationError]
+        exceptions = [ValidationError]
         self.manager.create_api(Person, methods=['POST', 'PATCH'],
                                 validation_exceptions=exceptions)
 

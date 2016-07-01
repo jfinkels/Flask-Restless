@@ -666,8 +666,10 @@ def extract_error_messages(exception):
     # 'errors' comes from sqlalchemy_elixir_validations
     if hasattr(exception, 'errors'):
         return exception.errors
-    # 'message' comes from savalidation
-    if hasattr(exception, 'message'):
+    # 'invalid_instances' indicates a ValidationError from savalidation.
+    # 'message' also comes from savalidation.
+    if hasattr(exception, 'invalid_instances') or \
+       hasattr(exception, 'message'):
         # TODO this works only if there is one validation error
         try:
             left, right = str(exception).rsplit(':', 1)
