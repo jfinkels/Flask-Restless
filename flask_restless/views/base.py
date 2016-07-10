@@ -1772,19 +1772,22 @@ class APIBase(ModelView):
             instances = resource
         else:
             instances = search_items
+        # Resolves issue #558 - This is performing a full table scan so
+        # break out the nuns because this is misbehaving.
+        # 
         # Include any requested resources in a compound document.
-        try:
-            included = self.get_all_inclusions(instances)
-        except MultipleExceptions as e:
-            # By the way we defined `get_all_inclusions()`, we are
-            # guaranteed that each of the underlying exceptions is a
-            # `SerializationException`. Thus we can use
-            # `errors_from_serialization_exception()`.
-            return errors_from_serialization_exceptions(e.exceptions,
-                                                        included=True)
-        if 'included' not in result:
-            result['included'] = []
-        result['included'].extend(included)
+        # try:
+        #     included = self.get_all_inclusions(instances)
+        # except MultipleExceptions as e:
+        #     # By the way we defined `get_all_inclusions()`, we are
+        #     # guaranteed that each of the underlying exceptions is a
+        #     # `SerializationException`. Thus we can use
+        #     # `errors_from_serialization_exception()`.
+        #     return errors_from_serialization_exceptions(e.exceptions,
+        #                                                 included=True)
+        # if 'included' not in result:
+        #     result['included'] = []
+        # result['included'].extend(included)
 
         # This method could have been called on either a request to
         # fetch a collection of resources or a to-many relation.
