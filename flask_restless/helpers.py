@@ -397,9 +397,11 @@ def strings_to_datetimes(model, dictionary):
     This function outputs a new dictionary; it does not modify the argument.
 
     """
-    # In Python 2.7+, this should be a dict comprehension.
-    return dict((k, string_to_datetime(model, k, v))
-                for k, v in dictionary.items() if k not in ('type', 'links'))
+    # Removed 'type' omission per issue # 559 as that field should not need 
+    # to be removed but leave a list just in-case there are different fields 
+    # needing to be omitted.
+    return {fieldname: string_to_datetime(model, fieldname, val) 
+            for fieldname, val in dictionary.items() if fieldname not in ['links']}
 
 
 def get_model(instance):
