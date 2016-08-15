@@ -98,149 +98,6 @@ class Deserializer(object):
         raise NotImplementedError
 
 
-class DefaultDeserializer(Deserializer):
-    """A default implementation of a deserializer for SQLAlchemy models.
-
-    When called, this object returns an instance of a SQLAlchemy model
-    with fields and relations specified by the provided dictionary.
-
-    """
-
-    def __init__(self, session, model, allow_client_generated_ids=False, **kw):
-        super(DefaultDeserializer, self).__init__(session, model, **kw)
-
-        #: Whether to allow client generated IDs.
-        self.allow_client_generated_ids = allow_client_generated_ids
-
-    def _load(self, data):
-        """Returns a new instance of a SQLAlchemy model represented by
-        the given resource object.
-
-        `data` is a dictionary representation of a JSON API resource
-        object.
-
-        This method may raise one of various
-        :exc:`DeserializationException` subclasses. If the instance has
-        a to-many relationship, this method may raise
-        :exc:`MultipleExceptions` as well, if there are multiple
-        exceptions when deserializing the related instances.
-
-        """
-        if 'type' not in data:
-            raise MissingType
-        if 'id' in data and not self.allow_client_generated_ids:
-            raise ClientGeneratedIDNotAllowed
-        # Determine the model from the type name that the the user is
-        # requesting. If no model is known with the given type, raise an
-        # exception.
-        type_ = data.pop('type')
-        expected_type = collection_name(self.model)
-        try:
-            model = model_for(type_)
-        except ValueError:
-            raise ConflictingType(expected_type, type_)
-        # If we wanted to allow deserializing a subclass of the model,
-        # we could use:
-        #
-        #     if not issubclass(model, self.model) and type != expected_type:
-        #
-        if type_ != expected_type:
-            raise ConflictingType(expected_type, type_)
-        # Check for any request parameter naming a column which does not exist
-        # on the current model.
-        for field in data:
-            if field == 'relationships':
-                for relation in data['relationships']:
-                    if not has_field(model, relation):
-                        raise UnknownRelationship(relation)
-            elif field == 'attributes':
-                for attribute in data['attributes']:
-                    if not has_field(model, attribute):
-                        raise UnknownAttribute(attribute)
-        # Determine which related instances need to be added.
-        links = {}
-        if 'relationships' in data:
-            links = data.pop('relationships', {})
-            for link_name, link_object in links.items():
-                related_model = get_related_model(model, link_name)
-                DRD = DefaultRelationshipDeserializer
-                deserializer = DRD(self.session, related_model, link_name)
-                # Create the deserializer for this relationship object.
-                if is_like_list(model, link_name):
-                    deserialize = deserializer.deserialize_many
-                else:
-                    deserialize = deserializer.deserialize
-                # This may raise a DeserializationException or
-                # MultipleExceptions.
-                links[link_name] = deserialize(link_object)
-        # TODO Need to check here if any related instances are None,
-        # like we do in the patch() method. We could possibly refactor
-        # the code above and the code there into a helper function...
-        pass
-        # Move the attributes up to the top level.
-        data.update(data.pop('attributes', {}))
-        # Special case: if there are any dates, convert the string form of the
-        # date into an instance of the Python ``datetime`` object.
-        data = strings_to_datetimes(model, data)
-        # Create the new instance by keyword attributes.
-        instance = model(**data)
-        # Set each relation specified in the links.
-        for relation_name, related_value in links.items():
-            setattr(instance, relation_name, related_value)
-        return instance
-
-    def deserialize(self, document):
-        """Creates and returns an instance of the SQLAlchemy model
-        specified in the JSON API document.
-
-        Everything in the `document` other than the `data` element is
-        ignored.
-
-        For more information, see the documentation for the
-        :meth:`Deserializer.deserialize` method.
-
-        """
-        if 'data' not in document:
-            raise MissingData
-        data = document['data']
-        return self._load(data)
-
-    # # TODO JSON API currently doesn't support bulk creation of resources,
-    # # so this code cannot be accurately used/tested.
-    # def deserialize_many(self, document):
-    #     """Creates and returns a list of instances of the SQLAlchemy
-    #     model specified in the constructor whose fields are given in the
-    #     JSON API document.
-    #
-    #     This method assumes that each resource in the given document is
-    #     of the same type.
-    #
-    #     For more information, see the documentation for the
-    #     :meth:`Deserializer.deserialize_many` method.
-    #
-    #     """
-    #     if 'data' not in document:
-    #         raise MissingData
-    #     data = document['data']
-    #     if not isinstance(data, list):
-    #         raise NotAList
-    #     # Since loading each instance from a given resource object
-    #     # representation could theoretically raise a
-    #     # DeserializationException, we collect all the errors and wrap
-    #     # them in a MultipleExceptions exception object.
-    #     result = []
-    #     failed = []
-    #     for resource in data:
-    #         try:
-    #             instance = self._load(resource)
-    #             result.append(instance)
-    #         except DeserializationException as exception:
-    #             failed.append(exception)
-    #     if failed:
-    #         raise MultipleExceptions(failed)
-    #     return result
-
-
 class DefaultRelationshipDeserializer(Deserializer):
     """A default implementation of a deserializer for resource
     identifier objects for use in relationships in JSON API documents.
@@ -280,7 +137,17 @@ class DefaultRelationshipDeserializer(Deserializer):
         #: The name of the relationship being deserialized, as a string.
         self.relation_name = relation_name
 
-    def _load(self, data):
+    def cleanup_input_data(self, document):
+        """
+        Checks the input document and returns the data associated to it if any
+        :param document: The raw document for deserialization
+        :return: The model data associated in the document
+        """
+        if 'data' not in document:
+            raise MissingData(self.relation_name)
+        return document['data']
+
+    def load_single(self, data):
         """Gets the resource associated with the given resource
         identifier object.
 
@@ -297,17 +164,53 @@ class DefaultRelationshipDeserializer(Deserializer):
         :exc:`ConflictingType`.
 
         """
+        self.check_single_type_data(data)
+        model = self.get_model_from_data(data)
+        return self.get_instance(data, model)
+
+    def check_single_type_data(self, data):
+        """
+        Checks that the given object is a single object and not a to-many relationship
+        :param data: The data from which to extract the information
+        """
         # If this is a to-one relationship, get the sole instance of the model.
         if 'id' not in data:
             raise MissingID(self.relation_name)
         if 'type' not in data:
             raise MissingType(self.relation_name)
-        type_ = data['type']
-        if type_ != self.type_name:
-            raise ConflictingType(self.relation_name, self.type_name,
-                                  type_)
+
+    def get_model_from_data(self, data):
+        """
+        Determines the model from the type name that the the user is
+        requesting. If no model is known with the given type, raises an
+        exception.
+        :param data: The data from which to extract the information
+        :return: The associated model
+        """
+        type_ = data.pop('type')
+        expected_type = collection_name(self.model)
+        try:
+            model = model_for(type_)
+        except ValueError:
+            raise ConflictingType(expected_type, type_)
+        # If we wanted to allow deserializing a subclass of the model,
+        # we could use:
+        #
+        #     if not issubclass(model, self.model) and type != expected_type:
+        #
+        if type_ != expected_type:
+            raise ConflictingType(expected_type, type_)
+        return model
+
+    def get_instance(self, data, model):
+        """
+        Gets from the database the instance object from the given data
+        :param data: The data from which to get the object
+        :param model: The model of the object to fetch
+        :return: The instance of the object
+        """
         id_ = data['id']
-        return get_by(self.session, self.model, id_)
+        return get_by(self.session, model, id_)
 
     def deserialize(self, document):
         """Returns the SQLAlchemy instance identified by the resource
@@ -318,11 +221,54 @@ class DefaultRelationshipDeserializer(Deserializer):
         in the constructor of this class. If not, this raises
         :exc:`ConflictingType`.
 
+        `document` must contain a `data` attribute with the object attributes.
+        `data` must be a dictionary containing exactly two elements,
+        ``'type'`` and ``'id'``, or a list of dictionaries of that
+        form. In the former case, the `data` represents a to-one
+        relation and in the latter a to-many relation.
+
+
         """
-        if 'data' not in document:
-            raise MissingData(self.relation_name)
-        resource_identifier = document['data']
-        return self._load(resource_identifier)
+        data = self.cleanup_input_data(document)
+        return self.load_single(data)
+
+    def check_many_type_data(self, data):
+        """
+        Checks that the given object is a to-many relationship and not a single object
+        :param data: The data from which to extract the information
+        """
+        if not isinstance(data, list):
+            raise NotAList(self.relation_name)
+
+    def load_many(self, data):
+        """Gets the resources associated with the given resource
+        identifier object.
+
+        `data` must be a dictionary containing one key for each of the relationships
+        it relates to.
+
+        Returns the instances of the SQLAlchemy models specified in the constructor
+        whose IDs match the given `data`.
+
+        May raise :exc:`MissingID`, :exc:`MissingType`, or
+        :exc:`ConflictingType`.
+
+        """
+        # Since loading each related instance from a given resource
+        # identifier object representation could theoretically raise a
+        # DeserializationException, we collect all the errors and wrap
+        # them in a MultipleExceptions exception object.
+        result = []
+        failed = []
+        for resource_identifier in data:
+            try:
+                instance = self.load_single(resource_identifier)
+                result.append(instance)
+            except DeserializationException as exception:
+                failed.append(exception)
+        if failed:
+            raise MultipleExceptions(failed)
+        return result
 
     def deserialize_many(self, document):
         """Returns a list of SQLAlchemy instances identified by the
@@ -335,23 +281,209 @@ class DefaultRelationshipDeserializer(Deserializer):
         :exc:`ConflictingType`.
 
         """
+        data = self.cleanup_input_data(document)
+        self.check_many_type_data(data)
+        return self.load_many(data)
+
+
+class DefaultDeserializer(Deserializer):
+    """A default implementation of a deserializer for SQLAlchemy models.
+
+    When called, this object returns an instance of a SQLAlchemy model
+    with fields and relations specified by the provided dictionary.
+
+    """
+
+    def __init__(self, session, model,
+                 allow_client_generated_ids=False, relationship_deserializer=DefaultRelationshipDeserializer,
+                 **kw):
+        super(DefaultDeserializer, self).__init__(session, model, **kw)
+
+        #: Whether to allow client generated IDs.
+        self.allow_client_generated_ids = allow_client_generated_ids
+        #: The default deserializer for relationships
+        self.relationship_deserializer = relationship_deserializer or DefaultRelationshipDeserializer
+
+    def cleanup_input_data(self, document):
+        """
+        Checks the input document and returns the data associated to it if any
+        :param document: The raw document for deserialization
+        :return: The model data associated in the document
+        """
         if 'data' not in document:
-            raise MissingData(self.relation_name)
-        resource_identifiers = document['data']
-        if not isinstance(resource_identifiers, list):
-            raise NotAList(self.relation_name)
-        # Since loading each related instance from a given resource
-        # identifier object representation could theoretically raise a
-        # DeserializationException, we collect all the errors and wrap
-        # them in a MultipleExceptions exception object.
-        result = []
-        failed = []
-        for resource_identifier in resource_identifiers:
-            try:
-                instance = self._load(resource_identifier)
-                result.append(instance)
-            except DeserializationException as exception:
-                failed.append(exception)
-        if failed:
-            raise MultipleExceptions(failed)
-        return result
+            raise MissingData
+        data = document['data']
+        if 'type' not in data:
+            raise MissingType
+        if 'id' in data and not self.allow_client_generated_ids:
+            raise ClientGeneratedIDNotAllowed
+        return data
+
+    def get_model_from_data(self, data):
+        """
+        Determines the model from the type name that the the user is
+        requesting. If no model is known with the given type, raises an
+        exception.
+        :param data: The data from which to extract the information
+        :return: The associated model
+        """
+        type_ = data.pop('type')
+        expected_type = collection_name(self.model)
+        try:
+            model = model_for(type_)
+        except ValueError:
+            raise ConflictingType(expected_type, type_)
+        # If we wanted to allow deserializing a subclass of the model,
+        # we could use:
+        #
+        #     if not issubclass(model, self.model) and type != expected_type:
+        #
+        if type_ != expected_type:
+            raise ConflictingType(expected_type, type_)
+        return model
+
+    def check_relationships(self, data, model):
+        """
+        Checks for any request parameter naming a column which does not exist
+        on the current model.
+        :param data: The data from which to extract the information
+        :param model: The model to check against
+        """
+        for field in data:
+            if field == 'relationships':
+                for relation in data['relationships']:
+                    if not has_field(model, relation):
+                        raise UnknownRelationship(relation)
+            elif field == 'attributes':
+                for attribute in data['attributes']:
+                    if not has_field(model, attribute):
+                        raise UnknownAttribute(attribute)
+
+    def generate_relationship_links(self, data, model):
+        """
+        Determines which related instances need to be added and returns a dictionary
+        of links in the following form:
+
+        links = {relationship_name: deserialized_object, ...}
+
+        :param data: The data from which to extract the information
+        :param model: The model to check against
+        :return: A dictionary of the links to the related models
+        """
+        links = {}
+        if 'relationships' in data:
+            links = data.pop('relationships', {})
+            for link_name, link_object in links.items():
+                related_model = get_related_model(model, link_name)
+                deserializer = self.relationship_deserializer(self.session, related_model, link_name)
+                # Create the deserializer for this relationship object.
+                if is_like_list(model, link_name):
+                    deserialize = deserializer.deserialize_many
+                else:
+                    deserialize = deserializer.deserialize
+                # This may raise a DeserializationException or
+                # MultipleExceptions.
+                links[link_name] = deserialize(link_object)
+        return links
+
+    def cleanup_data(self, data, model):
+        """
+        Cleans up the data and transforms the necessary attributes
+        :param data: The data from which to extract the information
+        :param model: The model to check against
+        :return: The updated data object
+        """
+        # TODO Need to check here if any related instances are None,
+        # like we do in the patch() method. We could possibly refactor
+        # the code above and the code there into a helper function...
+        pass
+        # Move the attributes up to the top level.
+        data.update(data.pop('attributes', {}))
+        # Special case: if there are any dates, convert the string form of the
+        # date into an instance of the Python ``datetime`` object.
+        return strings_to_datetimes(model, data)
+
+    def create_model_from_data(self, data, model):
+        """
+        Creates a new model object from the given data
+        :param data: The data from which to build the object
+        :param model: The model to build the object from
+        :return: An instance of the object built with data
+        """
+        # Create the new instance by keyword attributes.
+        return model(**data)
+
+    def setup_relationships_in_instance(self, instance, links):
+        """
+        Links the given relationships to the instance
+        :param instance: The instance to fill
+        :param links: The dictionary of links to set on the instance
+        :return: The updated instance
+        """
+        # Set each relation specified in the links.
+        for relation_name, related_value in links.items():
+            setattr(instance, relation_name, related_value)
+        return instance
+
+    def deserialize(self, document):
+        """Creates and returns an instance of the SQLAlchemy model
+        specified in the JSON API document.
+
+        Everything in the `document` other than the `data` element is
+        ignored.
+
+        `data` is a dictionary representation of a JSON API resource
+        object.
+
+        This method may raise one of various
+        :exc:`DeserializationException` subclasses. If the instance has
+        a to-many relationship, this method may raise
+        :exc:`MultipleExceptions` as well, if there are multiple
+        exceptions when deserializing the related instances.
+
+        For more information, see the documentation for the
+        :meth:`Deserializer.deserialize` method.
+
+        """
+        data = self.cleanup_input_data(document)
+        model = self.get_model_from_data(data)
+        self.check_relationships(data, model)
+        links = self.generate_relationship_links(data, model)
+        data = self.cleanup_data(data, model)
+        instance = self.create_model_from_data(data, model)
+        return self.setup_relationships_in_instance(instance, links)
+
+    # # TODO JSON API currently doesn't support bulk creation of resources,
+    # # so this code cannot be accurately used/tested.
+    # def deserialize_many(self, document):
+    #     """Creates and returns a list of instances of the SQLAlchemy
+    #     model specified in the constructor whose fields are given in the
+    #     JSON API document.
+    #
+    #     This method assumes that each resource in the given document is
+    #     of the same type.
+    #
+    #     For more information, see the documentation for the
+    #     :meth:`Deserializer.deserialize_many` method.
+    #
+    #     """
+    #     if 'data' not in document:
+    #         raise MissingData
+    #     data = document['data']
+    #     if not isinstance(data, list):
+    #         raise NotAList
+    #     # Since loading each instance from a given resource object
+    #     # representation could theoretically raise a
+    #     # DeserializationException, we collect all the errors and wrap
+    #     # them in a MultipleExceptions exception object.
+    #     result = []
+    #     failed = []
+    #     for resource in data:
+    #         try:
+    #             instance = self._load(resource)
+    #             result.append(instance)
+    #         except DeserializationException as exception:
+    #             failed.append(exception)
+    #     if failed:
+    #         raise MultipleExceptions(failed)
+    #     return result
