@@ -1295,8 +1295,8 @@ class APIBase(ModelView):
     def __init__(self, session, model, preprocessors=None, postprocessors=None,
                  primary_key=None, serializer=None, deserializer=None,
                  validation_exceptions=None, includes=None, page_size=10,
-                 max_page_size=100, allow_to_many_replacement=False, *args,
-                 **kw):
+                 max_page_size=100, allow_to_many_replacement=False,
+                 custom_operators=None, *args, **kw):
         super(APIBase, self).__init__(session, model, *args, **kw)
 
         #: The name of the collection specified by the given model class
@@ -1360,6 +1360,8 @@ class APIBase(ModelView):
         #: The mapping from resource type name to requested sparse
         #: fields for resources of that type.
         self.sparse_fields = parse_sparse_fields()
+
+        self.custom_operators = custom_operators or {}
 
         # HACK: We would like to use the :attr:`API.decorators` class attribute
         # in order to decorate each view method with a decorator that catches
@@ -1655,7 +1657,8 @@ class APIBase(ModelView):
             search_ = partial(search, self.session, self.model)
         try:
             search_items = search_(filters=filters, sort=sort,
-                                   group_by=group_by)
+                                   group_by=group_by,
+                                   custom_operators=self.custom_operators)
         except (FilterParsingError, FilterCreationError) as exception:
             detail = 'invalid filter object: {0}'.format(str(exception))
             return error_response(400, cause=exception, detail=detail)

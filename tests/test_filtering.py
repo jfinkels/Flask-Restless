@@ -1197,7 +1197,6 @@ class TestOperators(SearchTestBase):
         keywords = ['compare', 'value', 'NULL', 'use', 'is_null', 'operator']
         check_sole_error(response, 400, keywords)
 
-
 class TestNetworkOperators(SearchTestBase):
     """Unit tests for the network address operators in PostgreSQL.
 
@@ -1371,6 +1370,44 @@ class TestNetworkOperators(SearchTestBase):
         document = loads(response.data)
         networks = document['data']
         assert ['1', '2'] == sorted(network['id'] for network in networks)
+
+
+class TestCustomOperators(SearchTestBase):
+    """Tests for each SQLAlchemy operator supported by Flask-Restless."""
+
+    def setUp(self):
+        """Creates the database, the :class:`~flask.Flask` object, the
+        :class:`~flask_restless.manager.APIManager` for that application,
+        and creates the ReSTful API endpoints for the models used in the test
+        methods.
+
+        """
+        super(TestCustomOperators, self).setUp()
+
+        class Person(self.Base):
+            __tablename__ = 'person'
+            id = Column(Integer, primary_key=True)
+            name = Column(Unicode)
+        self.Person = Person
+        self.Base.metadata.create_all()
+        self.manager.create_api(
+            Person,
+            custom_operators={
+                "custom_gt": lambda a, b: a > b
+            }
+        )
+
+    def test_custom_operator(self):
+        """Test for user defined operators."""
+        person1 = self.Person(id=1)
+        person2 = self.Person(id=2)
+        self.session.add_all([person1, person2])
+        self.session.commit()
+        filters = [dict(name='id', op="custom_gt", val=1)]
+        response = self.search('/api/person', filters)
+        document = loads(response.data)
+        people = document['data']
+        assert ['2'] == sorted(person['id'] for person in people)
 
 
 class TestAssociationProxy(SearchTestBase):

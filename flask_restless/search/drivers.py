@@ -29,7 +29,7 @@ from .filters import create_filters
 
 
 def search_relationship(session, instance, relation, filters=None, sort=None,
-                        group_by=None):
+                        group_by=None, custom_operators=None):
     """Returns a filtered, sorted, and grouped SQLAlchemy query
     restricted to those objects related to a given instance.
 
@@ -60,11 +60,12 @@ def search_relationship(session, instance, relation, filters=None, sort=None,
     query = query.filter(primary_key_value(related_model).in_(primary_keys))
 
     return search(session, related_model, filters=filters, sort=sort,
-                  group_by=group_by, _initial_query=query)
+                  group_by=group_by, _initial_query=query,
+                  custom_operators=custom_operators)
 
 
 def search(session, model, filters=None, sort=None, group_by=None,
-           _initial_query=None):
+           _initial_query=None, custom_operators=None):
     """Returns a filtered, sorted, and grouped SQLAlchemy query.
 
     `session` is the SQLAlchemy session in which to create the query.
@@ -100,7 +101,7 @@ def search(session, model, filters=None, sort=None, group_by=None,
     # Filter the query.
     #
     # This function call may raise an exception.
-    filters = create_filters(model, filters)
+    filters = create_filters(model, filters, custom_operators=custom_operators)
     query = query.filter(*filters)
 
     # Order the query. If no order field is specified, order by primary
