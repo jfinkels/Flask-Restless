@@ -395,7 +395,8 @@ class APIManager(object):
                              serializer_class=None, deserializer_class=None,
                              includes=None, allow_to_many_replacement=False,
                              allow_delete_from_to_many_relationships=False,
-                             allow_client_generated_ids=False):
+                             allow_client_generated_ids=False,
+                             custom_operators=None):
         """Creates and returns a ReSTful API interface as a blueprint, but does
         not register it on any :class:`flask.Flask` application.
 
@@ -660,7 +661,8 @@ class APIManager(object):
                                max_page_size=max_page_size,
                                serializer=serializer,
                                deserializer=deserializer,
-                               includes=includes)
+                               includes=includes,
+                               custom_operators=custom_operators)
 
         # add the URL rules to the blueprint: the first is for methods on the
         # collection only, the second is for methods which may or may not
@@ -705,6 +707,7 @@ class APIManager(object):
                       primary_key=primary_key,
                       validation_exceptions=validation_exceptions,
                       allow_to_many_replacement=allow_to_many_replacement,
+                      custom_operators=custom_operators,
                       # Keyword arguments RelationshipAPI.__init__()
                       allow_delete_from_to_many_relationships=adftmr)
         # When PATCH is allowed, certain non-PATCH requests are allowed

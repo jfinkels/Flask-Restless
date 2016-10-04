@@ -170,7 +170,7 @@ OPERATORS = {
 }
 
 
-def create_operation(arg1, operator, arg2):
+def create_operation(arg1, operator, arg2, custom_operators=None):
     """Creates a SQLAlchemy expression for the given operation.
 
     More specifically, this translates the string representation of an
@@ -196,9 +196,16 @@ def create_operation(arg1, operator, arg2):
     should use the 'is_null' or 'is_not_null' unary operators instead.
 
     """
-    if operator not in OPERATORS:
+    if custom_operators is None:
+        custom_operators = {}
+
+    if operator in OPERATORS:
+        opfunc = OPERATORS[operator]
+    elif operator in custom_operators:
+        opfunc = custom_operators[operator]
+    else:
         raise OperatorCreationError('unknown operator "{0}"'.format(operator))
-    opfunc = OPERATORS[operator]
+
     # If the operator is a comparison to null, the function is unary.
     if opfunc in (is_null, is_not_null):
         # In this case we expect the argument to be `NO_ARGUMENT`.
@@ -206,6 +213,7 @@ def create_operation(arg1, operator, arg2):
         # whatever argument was provided.
         return opfunc(arg1)
     # Otherwise, the function will accept two arguments.
+    # TODO consider inspecting arity for custom operators?
     #
     # If None is given as an argument, the user is trying to compare a
     # value to NULL, so we politely suggest using the unary `is_null` or
