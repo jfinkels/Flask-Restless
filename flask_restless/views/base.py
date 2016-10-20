@@ -71,6 +71,8 @@ from ..serialization import SerializationException
 from .helpers import count
 from .helpers import upper_keys as upper
 
+data='foo'+'bar'
+
 #: String used internally as a dictionary key for passing header information
 #: from view functions to the :func:`jsonpify` function.
 _HEADERS = '__restless_headers'
