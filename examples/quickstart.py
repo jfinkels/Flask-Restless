@@ -29,8 +29,21 @@ class Article(db.Model):
                                                         lazy='dynamic'))
 
 
+
 # Create the database tables.
 db.create_all()
+
+def populate_data():
+    db.drop_all()
+    db.create_all()
+
+    someone = Person(name='John')
+    db.session.add(someone)
+    computer = Computer(name='lixeiro')
+    db.session.add(computer)
+    someone.computers.append(computer)
+    db.session.commit()
+
 
 # Create the Flask-Restless API manager.
 manager = flask_restless.APIManager(app, flask_sqlalchemy_db=db)
@@ -40,5 +53,11 @@ manager = flask_restless.APIManager(app, flask_sqlalchemy_db=db)
 manager.create_api(Person, methods=['GET', 'POST', 'DELETE'])
 manager.create_api(Article, methods=['GET'])
 
+@app.before_first_request
+def before_first_request():
+    populate_data()
+
+
 # start the flask loop
-app.run()
+app.logger.info(repr(app.url_map))
+app.run(host="127.0.0.1", port=8080, debug=True)
