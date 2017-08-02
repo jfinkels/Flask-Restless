@@ -1,0 +1,54 @@
+Source: flask-restless
+Section: python
+Priority: optional
+Maintainer: Jeffrey Finkelstein <jeffrey.finkelstein@gmail.com>
+Uploaders: Jeffrey Finkelstein <jeffrey.finkelstein@gmail.com>
+Build-Depends:
+ debhelper (>= 9),
+ dh-python,
+ python-all (>= 2.6),
+ python-dateutil (>= 2.2),
+ python-flask (>= 0.10),
+ python-mimerender (>= 0.5.2),
+ python-setuptools,
+ python-sqlalchemy (>= 0.8),
+ python3-all (>= 3.3),
+ python3-dateutil (>= 2.2),
+ python3-flask (>= 0.10),
+ python3-mimerender (>= 0.5.2),
+ python3-setuptools,
+ python3-sqlalchemy (>= 0.8)
+X-Python-Version: >= 2.6
+X-Python3-Version: >= 3.3
+Standards-Version: 3.9.8
+Homepage: https://pypi.python.org/pypi/Flask-Restless
+Vcs-Git: https://github.com/jfinkels/flask-restless.git
+Vcs-Browser: https://github.com/jfinkels/flask-restless
+
+Package: python-flask-restless
+Architecture: all
+Depends:
+ python-dateutil (>= 2.2),
+ python-flask (>= 0.10),
+ python-mimerender (>= 0.5.2),
+ python-sqlalchemy (>= 0.8),
+ ${misc:Depends},
+ ${python:Depends}
+Description: A Flask extension for creating simple ReSTful JSON APIs from SQLAlchemy models.
+ This is Flask-Restless, a Flask extension that creates URL endpoints that satisfy the requirements
+ of the JSON API specification.
+ It is compatible with models that have been defined using either SQLAlchemy or Flask-SQLAlchemy.
+
+Package: python3-flask-restless
+Architecture: all
+Depends:
+ python3-dateutil (>= 2.2),
+ python3-flask (>= 0.10),
+ python3-mimerender (>= 0.5.2),
+ python3-sqlalchemy (>= 0.8),
+ ${misc:Depends},
+ ${python3:Depends}
+Description: A Flask extension for creating simple ReSTful JSON APIs from SQLAlchemy models.
+ This is Flask-Restless, a Flask extension that creates URL endpoints that satisfy the requirements
+ of the JSON API specification.
+ It is compatible with models that have been defined using either SQLAlchemy or Flask-SQLAlchemy.
