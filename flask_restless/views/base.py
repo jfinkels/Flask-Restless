@@ -1584,7 +1584,9 @@ class APIBase(ModelView):
         # result['includes'] = includes
         # Include any requested resources in a compound document.
         try:
-            page_size = len(result.get('data', []))
+            page_size = None
+            if result and result.get('data', None):
+                page_size = len(result.get('data'))
             included = self.get_all_inclusions(resource, page_size=page_size)
         except MultipleExceptions as e:
             # By the way we defined `get_all_inclusions()`, we are
@@ -1734,10 +1736,12 @@ class APIBase(ModelView):
             instances = search_items
         # Include any requested resources in a compound document.
         try:
-            if paginated and hasattr(paginated, 'items'):
-                page_size = len(paginated.items)
-            else:
-                page_size = None
+            page_size = None
+            try:
+                if hasattr(paginated, 'items'):
+                    page_size = len(paginated.items)
+            except (TypeError, UnboundLocalError):
+                pass
             included = self.get_all_inclusions(instances, page_size=page_size)
         except MultipleExceptions as e:
             # By the way we defined `get_all_inclusions()`, we are
