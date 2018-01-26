@@ -1734,7 +1734,10 @@ class APIBase(ModelView):
             instances = search_items
         # Include any requested resources in a compound document.
         try:
-            page_size = len(paginated.items)
+            if paginated and hasattr(paginated, 'items'):
+                page_size = len(paginated.items)
+            else:
+                page_size = None
             included = self.get_all_inclusions(instances, page_size=page_size)
         except MultipleExceptions as e:
             # By the way we defined `get_all_inclusions()`, we are
