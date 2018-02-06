@@ -22,6 +22,7 @@ from __future__ import division
 
 from datetime import datetime
 from unittest2 import skip
+from enum import IntEnum
 
 try:
     from flask_sqlalchemy import SQLAlchemy
@@ -37,10 +38,20 @@ from sqlalchemy import func
 from sqlalchemy import Integer
 from sqlalchemy import Time
 from sqlalchemy import Unicode
+from sqlalchemy import Enum
+from sqlalchemy import String
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
+
+<<<<<<< HEAD
+from marshmallow import post_load
+from marshmallow_jsonapi import Schema, fields
+from marshmallow_enum import EnumField
+=======
+from marshmallow import ValidationError
+>>>>>>> 4f5f464... testing - add unit tests to verify that validation errors are raised on patch
 
 from flask_restless import APIManager
 from flask_restless import JSONAPI_MIMETYPE
@@ -55,6 +66,13 @@ from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
 from .helpers import ManagerTestBase
 from .helpers import raise_s_exception as raise_exception
+from .helpers import raise_s_validation_error as raise_validation_error
+
+from .marshmallow_serializers import MarshmallowSerializer
+from .marshmallow_serializers import MarshmallowDeserializer
+
+# from flask_restless import DefaultSerializer
+# from flask_restless import DefaultDeserializer
 
 
 class TestUpdating(ManagerTestBase):
@@ -63,8 +81,13 @@ class TestUpdating(ManagerTestBase):
     def setUp(self):
         """Creates the database, the :class:`~flask.Flask` object, the
         :class:`~flask_restless.manager.APIManager` for that application, and
-        creates the ReSTful API endpoints for the :class:`TestSupport.Person`
-        and :class:`TestSupport.Article` models.
+        creates the ReSTful API endpoints for the :class:`TestSupport.Person`,
+        :class:`TestSupport.Article` and :class:`TestSupport.Address` models.
+
+        For custom serialization, it also creates
+        :class:`TestSupport.AddressSchema`,
+        :class:`TestSupport.AddressSerializer` and
+        :class:`TestSupport.AddressDeserializer`
 
         """
         super(TestUpdating, self).setUp()
@@ -86,6 +109,37 @@ class TestUpdating(ManagerTestBase):
 
             def foo(self):
                 return u'foo'
+
+        class AddressType(IntEnum):
+            HOME, OFFICE, UNKNOWN = range(3)
+
+        class Address(self.Base):
+            __tablename__ = 'address'
+            id = Column(Integer, primary_key=True)
+            address_str = Column(String(30))
+            address_type = Column(Enum(AddressType), default=AddressType.UNKNOWN)
+            # field to force model serialization, based on 'changes on update'
+            time_updated = Column(DateTime, onupdate=datetime.utcnow)
+
+        class AddressSchema(Schema):
+            id = fields.Integer(dump_only=True)
+            address_str = fields.Str()
+            address_type = EnumField(AddressType)
+
+            class Meta:
+                type_ = 'address'
+                model = Address
+                strict = True
+
+            @post_load
+            def make_object(self, data):
+                return self.Meta.model(**data)
+
+        class AddressSerializer(MarshmallowSerializer):
+            schema_class = AddressSchema
+
+        class AddressDeserializer(MarshmallowDeserializer):
+            schema_class = AddressSchema
 
         # This example comes from the SQLAlchemy documentation.
         #
@@ -122,11 +176,18 @@ class TestUpdating(ManagerTestBase):
         self.Article = Article
         self.Interval = Interval
         self.Person = Person
+        self.Address = Address
+        self.AddressType = AddressType
         self.Tag = Tag
         self.Base.metadata.create_all()
+        # deserializer_class = DefaultDeserializer
+        # deserializer_ = deserializer_class(session=self.session, model=Person,allow_client_generated_ids=True)
         self.manager.create_api(Article, methods=['PATCH'])
         self.manager.create_api(Interval, methods=['PATCH'])
         self.manager.create_api(Person, methods=['PATCH'])
+        self.manager.create_api(Address, methods=['PATCH'],
+                                serializer_class=AddressSerializer,
+                                deserializer_class=AddressDeserializer)
 
     def test_wrong_content_type(self):
         """Tests that if a client specifies only :http:header:`Accept`
@@ -256,6 +317,25 @@ class TestUpdating(ManagerTestBase):
         response = self.app.patch('/api/person/1', data=data)
         assert response.status_code == 204
         assert person.birth_datetime == now
+
+    def test_deserializing_enum_field(self):
+        """Test for deserializing a JSON representation of an Enum field."""
+        address = self.Address(id=1)
+        self.session.add(address)
+        self.session.commit()
+        data = {
+            'data': {
+                'type': 'address',
+                'id': '1',
+                'attributes': {
+                    'address_type': "HOME"
+                }
+            }
+        }
+        data = dumps(data)
+        response = self.app.patch('/api/address/1', data=data)
+        assert response.status_code == 200  # changes on update were forced
+        assert address.address_type == self.AddressType.HOME
 
     def test_correct_content_type(self):
         """Tests that the server responds with :http:status:`201` if the
@@ -892,6 +972,34 @@ class TestUpdating(ManagerTestBase):
         response = self.app.patch('/api/tag/1', data=dumps(data))
         check_sole_error(response, 500, ['Failed to serialize', 'type', 'tag',
                                          'ID', '1'])
+
+    def test_serialization_validation_error(self):
+        """Tests that serialization validation errors are caught when
+        responding with content.
+
+        A representation of the modified resource is returned to the
+        client when an update causes additional changes in the resource
+        in ways other than those specified by the client.
+
+        """
+        tag = self.Tag(id=1)
+        self.session.add(tag)
+        self.session.commit()
+        self.manager.create_api(self.Tag, methods=['PATCH'],
+                                validation_exceptions=[ValidationError],
+                                serializer_class=raise_validation_error)
+        data = {
+            'data': {
+                'type': 'tag',
+                'id': '1',
+                'attributes': {
+                    'name': u'foo'
+                }
+            }
+        }
+        response = self.app.patch('/api/tag/1', data=dumps(data))
+        assert response.status_code == 400
+        assert response.status == '400 BAD REQUEST'
 
     def test_dont_assign_to_method(self):
         """Tests that if a certain method is to be included in a
