@@ -119,8 +119,10 @@ def has(arg1, arg2):
 def any_(arg1, arg2):
     return arg1.any(arg2)
 
+
 def to_tsquery(arg1, arg2):
     return arg1.match(arg2)
+
 
 def plainto_tsquery(arg1, arg2):
     return arg1.op('@@')(func.plainto_tsquery(arg2))
