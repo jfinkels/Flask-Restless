@@ -326,12 +326,12 @@ class APIManager(object):
         collection_name = self.created_apis_for[model].collection_name
         blueprint_name = self.created_apis_for[model].blueprint_name
         api_name = APIManager.api_name(collection_name)
-        parts = [blueprint_name, api_name]
+        view_name = '{}.{}'.format(blueprint_name, api_name)
         # If we are looking for a relationship URL, the view name ends with
-        # '.relationships'.
+        # '_relationships'.
         if 'relationship' in kw and kw.pop('relationship'):
-            parts.append('relationships')
-        url = flask_url_for('.'.join(parts), **kw)
+            view_name = '{}_relationships'.format(view_name)
+        url = flask_url_for(view_name, **kw)
         # if _absolute_url:
         #     url = urljoin(request.url_root, url)
         return url
@@ -752,7 +752,7 @@ class APIManager(object):
         # :http:get:`/api/articles/1/relationships/author` interpret the
         # word `relationships` as the name of a relation of an article
         # object.
-        relationship_api_name = '{0}.relationships'.format(apiname)
+        relationship_api_name = '{0}_relationships'.format(apiname)
         rapi_view = RelationshipAPI.as_view
         adftmr = allow_delete_from_to_many_relationships
         relationship_api_view = \
