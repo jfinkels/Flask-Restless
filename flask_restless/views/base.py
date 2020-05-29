@@ -1413,7 +1413,7 @@ class APIBase(ModelView):
         # one instance. Otherwise, collect the resources to include for
         # each instance in `instances`.
         if isinstance(instance_or_instances, Query):
-            instances = instance_or_instances
+            instances = instance_or_instances.all()
             to_include = set(chain(map(self.resources_to_include, instances)))
         else:
             instance = instance_or_instances
