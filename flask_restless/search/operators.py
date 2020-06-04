@@ -197,7 +197,7 @@ def create_operation(arg1, operator, arg2):
     given by the keys of :data:`OPERATORS`. For more information on
     recognized search operators, see :doc:`filtering`.
 
-    `operator` is a string representating the operation which will be
+    `operator` is a string representing the operation which will be
      executed between the field and the argument received. For example,
      'gt', 'lt', 'like', 'in', 'has', etc. `operator` must not be
      None. If the operator is unknown, an :exc:`OperatorCreationError`
