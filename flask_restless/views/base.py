@@ -1388,7 +1388,7 @@ class APIBase(ModelView):
         current_app.logger.exception(str(exception))
         return errors_response(400, errors)
 
-    def get_all_inclusions(self, instance_or_instances):
+    def get_all_inclusions(self, instance_or_instances, page_size=None):
         """Returns a list of all the requested included resources
         associated with the given instance or instances of a SQLAlchemy
         model.
@@ -1407,13 +1407,18 @@ class APIBase(ModelView):
         contains a list of the :exc:`SerializationException` objects
         that caused it.
 
+        ``page_size`` is an integer with the size of the result set.
+        this is to avoid full table scan to find data to include.
         """
         # If `instance_or_instances` is actually just a single instance
         # of a SQLAlchemy model, get the resources to include for that
         # one instance. Otherwise, collect the resources to include for
         # each instance in `instances`.
         if isinstance(instance_or_instances, Query):
-            instances = instance_or_instances
+            if page_size and isinstance(page_size, int):
+                instances = instance_or_instances.limit(page_size)
+            else:
+                instances = instance_or_instances
             to_include = set(chain(map(self.resources_to_include, instances)))
         else:
             instance = instance_or_instances
@@ -1577,10 +1582,12 @@ class APIBase(ModelView):
         # includer = Includer(resource)
         # includes = includer.generate_includes(resource)
         # result['includes'] = includes
-
         # Include any requested resources in a compound document.
         try:
-            included = self.get_all_inclusions(resource)
+            page_size = None
+            if result and result.get('data', None):
+                page_size = len(result.get('data'))
+            included = self.get_all_inclusions(resource, page_size=page_size)
         except MultipleExceptions as e:
             # By the way we defined `get_all_inclusions()`, we are
             # guaranteed that each of the underlying exceptions is a
@@ -1729,7 +1736,13 @@ class APIBase(ModelView):
             instances = search_items
         # Include any requested resources in a compound document.
         try:
-            included = self.get_all_inclusions(instances)
+            page_size = None
+            try:
+                if hasattr(paginated, 'items'):
+                    page_size = len(paginated.items)
+            except (TypeError, UnboundLocalError):
+                pass
+            included = self.get_all_inclusions(instances, page_size=page_size)
         except MultipleExceptions as e:
             # By the way we defined `get_all_inclusions()`, we are
             # guaranteed that each of the underlying exceptions is a
