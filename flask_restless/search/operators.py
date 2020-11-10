@@ -18,6 +18,8 @@ SQLAlchemy operation that can be used by the
 creating the expression.
 
 """
+from sqlalchemy import func
+
 #: Special symbol that represents the absence of a `val` element in a
 #: dictionary representing a filter object.
 NO_ARGUMENT = object()
@@ -118,6 +120,14 @@ def any_(arg1, arg2):
     return arg1.any(arg2)
 
 
+def to_tsquery(arg1, arg2):
+    return arg1.match(arg2)
+
+
+def plainto_tsquery(arg1, arg2):
+    return arg1.op('@@')(func.plainto_tsquery(arg2))
+
+
 #: Operator functions keyed by name.
 #:
 #: Each of these functions accepts either one or two arguments. The
@@ -167,6 +177,8 @@ OPERATORS = {
     # (Binary) relationship operators.
     'has': has,
     'any': any_,
+    'to_tsquery': to_tsquery,
+    'plainto_tsquery': plainto_tsquery,
 }
 
 
