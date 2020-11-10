@@ -721,6 +721,8 @@ class API(APIBase):
                 result = self.serializer.serialize(instance, only=only)
             except SerializationException as exception:
                 return errors_from_serialization_exceptions([exception])
+            except self.validation_exceptions as exception:
+                return self._handle_validation_exception(exception)
             status = 200
         else:
             result = dict()

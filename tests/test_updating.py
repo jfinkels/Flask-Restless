@@ -41,6 +41,7 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref
 from sqlalchemy.orm import relationship
+from marshmallow import ValidationError
 
 from flask_restless import APIManager
 from flask_restless import JSONAPI_MIMETYPE
@@ -55,6 +56,7 @@ from .helpers import MSIE8_UA
 from .helpers import MSIE9_UA
 from .helpers import ManagerTestBase
 from .helpers import raise_s_exception as raise_exception
+from .helpers import raise_s_validation_error as raise_validation_error
 
 
 class TestUpdating(ManagerTestBase):
@@ -892,6 +894,34 @@ class TestUpdating(ManagerTestBase):
         response = self.app.patch('/api/tag/1', data=dumps(data))
         check_sole_error(response, 500, ['Failed to serialize', 'type', 'tag',
                                          'ID', '1'])
+
+    def test_serialization_validation_error(self):
+        """Tests that serialization validation errors are caught when
+        responding with content.
+
+        A representation of the modified resource is returned to the
+        client when an update causes additional changes in the resource
+        in ways other than those specified by the client.
+
+        """
+        tag = self.Tag(id=1)
+        self.session.add(tag)
+        self.session.commit()
+        self.manager.create_api(self.Tag, methods=['PATCH'],
+                                validation_exceptions=[ValidationError],
+                                serializer_class=raise_validation_error)
+        data = {
+            'data': {
+                'type': 'tag',
+                'id': '1',
+                'attributes': {
+                    'name': u'foo'
+                }
+            }
+        }
+        response = self.app.patch('/api/tag/1', data=dumps(data))
+        assert response.status_code == 400
+        assert response.status == '400 BAD REQUEST'
 
     def test_dont_assign_to_method(self):
         """Tests that if a certain method is to be included in a

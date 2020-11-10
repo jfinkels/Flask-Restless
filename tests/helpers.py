@@ -39,6 +39,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session as SessionBase
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import TypeDecorator
+from marshmallow import ValidationError
 
 from flask_restless import APIManager
 from flask_restless import collection_name
@@ -118,6 +119,29 @@ class raise_d_exception(DefaultDeserializer):
         """Immediately raises a :exc:`DeserializationException`."""
         raise DeserializationException
 
+
+class raise_s_validation_error(DefaultSerializer):
+    """A serializer that unconditionally raises a validation error when
+    either :meth:`.serialize` or :meth:`.serialize_many` is called.
+
+    This class is useful for tests of validation errors.
+
+    """
+
+    def serialize(self, instance, *args, **kw):
+        """Immediately raises a :exc:`ValidationError` with
+        access to the provided `instance` of a SQLAlchemy model.
+
+        """
+        raise ValidationError(instance)
+
+    def serialize_many(self, instances, *args, **kw):
+        """Immediately raises a :exc:`ValidationError`.
+
+        This function requires `instances` to be non-empty.
+
+        """
+        raise ValidationError(instances[0])
 
 def isclass(obj):
     """Returns ``True`` if and only if the specified object is a type (or a
